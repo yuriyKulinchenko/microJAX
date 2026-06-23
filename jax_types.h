@@ -16,7 +16,7 @@ using f64 = double;
 namespace jax {
 
 enum class primitive_op {
-    ADD, SUM, SIN, MUL
+    ADD, SUB, MUL, SIN, COS, EXP, LOG
 };
 
 enum class type_enum {
@@ -25,6 +25,10 @@ enum class type_enum {
 
 class type {
 public:
+
+    explicit type(type_enum base_type):
+    base_type(base_type) {}
+
     type(type_enum base_type, std::vector<u32> dimension):
     base_type(base_type),
     dimension(std::move(dimension)) {}
@@ -60,10 +64,10 @@ private:
 
 class var {
 public:
-    var(): id{global_id++} {}
+    explicit var(type type_): id(global_id++), type_(std::move(type_)) {}
 private:
     u32 id;
-
+    type type_;
     // global_id is bumped on every new variable added
     inline static u32 global_id = 0;
 };
@@ -129,19 +133,23 @@ private:
 
 #undef check_type
 
+using value = std::variant<array, var>;
 
 // An equation will look something like:
 // a:f32[8] = sin b
 // c:f32[] = add a b
 class equation {
 public:
+    equation(std::vector<value> input, std::vector<var> output, primitive_op op):
+    input(std::move(input)),
+    output(std::move(output)),
+    op(op) {}
 
 private:
-
-    std::vector<var> vars;
-
+    std::vector<value> input;
+    std::vector<var> output;
+    primitive_op op;
 };
-
 
 
 }
