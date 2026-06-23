@@ -11,7 +11,7 @@ T sin(T x) {
 }
 
 template<typename T> requires(!std::is_scalar_v<T>)
-T& sin(T& x) {
+T sin(T x) {
     return x.sin();
 }
 
@@ -21,7 +21,7 @@ T cos(T x) {
 }
 
 template<typename T> requires(!std::is_scalar_v<T>)
-T& cos(T& x) {
+T cos(T x) {
     return x.cos();
 }
 

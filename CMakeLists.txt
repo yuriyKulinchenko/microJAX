@@ -6,7 +6,6 @@ set(CMAKE_CXX_STANDARD 23)
 add_executable(microJAX main.cpp
         jaxpr_types.cpp
         jaxpr_types.h
-        tracer.cpp
         tracer.h
-        jax_functions.cpp
-        jax_functions.h)
+        jax_functions.h
+        tracer.cpp)

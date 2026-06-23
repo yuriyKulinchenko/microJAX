@@ -23,15 +23,19 @@ enum class type_enum {
     I32, I64, F32, F64
 };
 
-class type {
+class type_t {
 public:
 
-    explicit type(type_enum base_type):
+    explicit type_t(type_enum base_type):
     base_type(base_type) {}
 
-    type(type_enum base_type, std::vector<u32> dimension):
+    type_t(type_enum base_type, std::vector<u32> dimension):
     base_type(base_type),
     dimension(std::move(dimension)) {}
+
+    bool operator==(const type_t& other) const {
+        return base_type == other.base_type && dimension == other.dimension;
+    }
 
     bool is_i32() {
         return base_type == type_enum::I32;
@@ -62,30 +66,41 @@ private:
     std::vector<u32> dimension;
 };
 
-class var {
+class var_t {
 public:
-    explicit var(type type_): id(global_id++), type_(std::move(type_)) {}
+    explicit var_t(u32 id, type_t type): id(id), type(std::move(type)) {}
+
+    [[nodiscard]] u32 get_id() const {
+        return id;
+    }
+
+    void set_id(u32 new_id) {
+        id = new_id;
+    }
+
+    [[nodiscard]] const type_t& get_type() const {
+        return type;
+    }
+
 private:
+    type_t type;
     u32 id;
-    type type_;
-    // global_id is bumped on every new variable added
-    inline static u32 global_id = 0;
 };
 
 #define check_type(T_real, T_enum)                          \
 if constexpr (std::is_same_v<T, T_real>) {                  \
-    if(type_.get_base_type() != type_enum::T_enum) {        \
+    if(type.get_base_type() != type_enum::T_enum) {        \
         throw std::logic_error("Error: type mismatch");     \
     }                                                       \
 }
 
-class array {
+class array_t {
 public:
     template<typename T>
-    explicit array(type type_, std::vector<T> value):
-    type_(std::move(type_)),
+    explicit array_t(type_t type, std::vector<T> value):
+    type(std::move(type)),
     value(std::move(value)),
-    strides(std::vector<u32>(type_.get_dimension().size())) {
+    strides(std::vector<u32>(type.get_dimension().size())) {
         check_type(i32, I32);
         check_type(i64, I64);
         check_type(f32, F32);
@@ -95,13 +110,13 @@ public:
 
         strides[strides.size() - 1] = 1;
         for (size_t i = strides.size() - 1; i-->0;) {
-            strides[i] = strides[i + 1] * type_.get_dimension()[i + 1];
+            strides[i] = strides[i + 1] * type.get_dimension()[i + 1];
         }
     }
 
     // Quite inefficient, use sparingly
     std::variant<i32, i64, f32, f64> operator[](std::same_as<size_t> auto... indices) {
-        switch (type_.get_base_type()) {
+        switch (type.get_base_type()) {
             using enum type_enum;
             case I32: return access<i32>(indices...);
             case I64: return access<i64>(indices...);
@@ -120,8 +135,12 @@ public:
         return raw[idx];
     }
 
+    [[nodiscard]] const type_t& get_type() const {
+        return type;
+    }
+
 private:
-    type type_;
+    type_t type;
     std::variant<
         std::vector<i32>,
         std::vector<i64>,
@@ -133,22 +152,46 @@ private:
 
 #undef check_type
 
-using value = std::variant<array, var>;
+class value {
+public:
+    explicit value(array_t array): variant_(std::move(array)) {}
+    explicit value(var_t var): variant_(std::move(var)) {}
+
+    [[nodiscard]] const type_t& get_type() const {
+        return std::visit([](auto& v) {return v.type;}, variant_);
+    }
+
+    array_t& get_array() {
+        return std::get<array_t>(variant_);
+    }
+
+    var_t& get_var() {
+        return std::get<var_t>(variant_);
+    }
+
+private:
+   std::variant<array_t, var_t> variant_;
+};
 
 // An equation will look something like:
 // a:f32[8] = sin b
 // c:f32[] = add a b
 class equation {
 public:
-    equation(std::vector<value> input, std::vector<var> output, primitive_op op):
+    equation(std::vector<value> input, std::vector<var_t> output, primitive_op op):
     input(std::move(input)),
     output(std::move(output)),
     op(op) {}
 
 private:
     std::vector<value> input;
-    std::vector<var> output;
+    std::vector<var_t> output;
     primitive_op op;
+};
+
+class expression {
+public:
+    std::vector<equation> equations;
 };
 
 
