@@ -11,4 +11,5 @@ add_executable(microJAX main.cpp
         tracer.cpp
         helper.h
         jax_logger.cpp
-        jax_logger.h)
+        jax_logger.h
+        tagged_variant.h)
