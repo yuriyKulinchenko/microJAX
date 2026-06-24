@@ -6,8 +6,6 @@
 #include <concepts>
 #include <utility>
 
-#include "tagged_variant.h"
-
 // tagged_variant is a wrapper around std::variant which uses enum tags to discriminate between members
 
 template<typename E>
@@ -125,6 +123,14 @@ namespace impl_t_var {
         using type = std::variant<Entries...>;
     };
 
+    template<typename Vector>
+    struct vector_to_common_type_class;
+
+    template<typename... Entries>
+    struct vector_to_common_type_class<type_vector<Entries...>> {
+        using type = std::common_type_t<Entries...>;
+    };
+
     // Core functionality:
 
     template<Enum auto tag, size_t accumulator, typename... Entries>
@@ -153,7 +159,7 @@ namespace impl_t_var {
 
     };
 
-    // Match syntax: this is work-in-progress
+    // Match expression:
 
     template<typename Entry, typename Function>
     struct entry_matches_function;
@@ -166,27 +172,28 @@ namespace impl_t_var {
     template<typename EntryVector, typename FunctionVector>
     struct entries_match_functions_class;
 
-    template<>
-    struct entries_match_functions_class<type_vector<>, type_vector<>> {
-        static constexpr bool value = true;
+    template<typename... Entries, typename... Functions>
+    struct entries_match_functions_class<type_vector<Entries...>, type_vector<Functions...>> {
+        static constexpr bool value = (entry_matches_function<Entries, Functions>::value && ...);
     };
 
-    template<typename... Fs>
-    struct entries_match_functions_class<type_vector<>, type_vector<Fs...>> {
-        static constexpr bool value = false;
+    // All outputs of a match expression must have a shared type:
+
+    template<typename Entry, typename Function>
+    struct output_type_class;
+
+    template<Enum auto tag, typename Type, typename Function>
+    struct output_type_class<entry<tag, Type>, Function> {
+        using type = std::invoke_result_t<Function, Type&>;
     };
 
-    template<typename... Entries>
-    struct entries_match_functions_class<type_vector<Entries...>, type_vector<>> {
-        static constexpr bool value = false;
-    };
+    template<typename EntryVector, typename FunctionVector>
+    struct outputs_type_class;
 
-    template<typename Entry, typename Function, typename... Entries, typename... Fs>
-    struct entries_match_functions_class<type_vector<Entry, Entries...>, type_vector<Function, Fs...>> {
-        static constexpr bool value = entry_matches_function<Entry, Function>::value
-            && entries_match_functions_class<type_vector<Entries...>, type_vector<Fs...>>::value;
+    template<typename... Entries, typename... Functions>
+    struct outputs_type_class<type_vector<Entries...>, type_vector<Functions...>> {
+        using type = std::common_type_t<typename output_type_class<Entries, Functions>::type...>;
     };
-
 
 }
 
@@ -216,6 +223,9 @@ using entries_to_variant_t = typename impl_t_var::vector_to_variant_class<
 template<typename... Entries>
 using tag_type_t = typename impl_t_var::tag_type_class<Entries...>::type;
 
+template<typename EntryVector, typename FunctionVector>
+using output_type_t = typename impl_t_var::outputs_type_class<EntryVector, FunctionVector>::type;
+
 // ====================================================== VALUES ======================================================
 
 template<Enum auto tag, typename... Entries>
@@ -238,11 +248,11 @@ public:
     friend const auto& get(const tagged_variant<Entries_...>& var);
 
 
-    template<size_t index, typename... Entries_, typename F_>
-    friend auto match_(tagged_variant<Entries_...>& var, F_ f);
+    template<size_t index, typename Ret_, typename... Entries_, typename F_>
+    friend Ret_ match_(tagged_variant<Entries_...>& var, F_ f);
 
-    template<size_t index, typename... Entries_, typename F_, typename... Fs_>
-    friend auto match_(tagged_variant<Entries_...>& var, F_ f, Fs_... fs);
+    template<size_t index, typename Ret_, typename... Entries_, typename F_, typename... Fs_>
+    friend Ret_ match_(tagged_variant<Entries_...>& var, F_ f, Fs_... fs);
 
     template<tag_type tag, typename... Args>
     requires tag_occurs<tag, Entries...>
@@ -277,28 +287,30 @@ enum class test {
     Circle, Rectangle, Triangle
 };
 
-template<size_t index, typename... Entries, typename F>
-auto match_(tagged_variant<Entries...>& var, F f) {
+template<size_t index, typename Ret, typename... Entries, typename F>
+Ret match_(tagged_variant<Entries...>& var, F f) {
     if (var.variant_.index() == index) {
         return f(std::get<index>(var.variant_));
     }
     throw std::bad_variant_access{};
 }
 
-template<size_t index, typename... Entries, typename F, typename... Fs>
-auto match_(tagged_variant<Entries...>& var, F f, Fs... fs) {
+template<size_t index, typename Ret, typename... Entries, typename F, typename... Fs>
+Ret match_(tagged_variant<Entries...>& var, F f, Fs... fs) {
     if (var.variant_.index() == index) {
         return f(std::get<index>(var.variant_));
     }
-    return match_<index + 1>(var, fs...);
+    return match_<index + 1, Ret>(var, fs...);
 }
 
 template<typename... Entries, typename... Fs>
 requires entries_match_functions<impl_t_var::type_vector<Entries...>, impl_t_var::type_vector<Fs...>>
-auto match(tagged_variant<Entries...>& var, Fs... fs) {
-    return match_<0>(var, fs...);
-}
+&& requires {typename output_type_t< impl_t_var::type_vector<Entries...>, impl_t_var::type_vector<Fs...>>;}
 
+auto match(tagged_variant<Entries...>& var, Fs... fs) {
+    using Ret = output_type_t<impl_t_var::type_vector<Entries...>, impl_t_var::type_vector<Fs...>>;
+    return match_<0, Ret>(var, fs...);
+}
 
 inline void test_fn() {
     using enum test;
