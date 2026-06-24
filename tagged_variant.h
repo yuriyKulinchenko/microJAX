@@ -28,6 +28,16 @@ namespace impl_t_var {
     template<typename T, typename Vector>
     using cons = typename cons_class<T, Vector>::vector;
 
+    // Extract tag type:
+
+    template<typename... Entries>
+    struct tag_type_class;
+
+    template<Enum auto tag, typename T, typename... Rest>
+    struct tag_type_class<entry<tag, T>, Rest...> {
+        using type = decltype(tag);
+    };
+
     // 'only_entries' enforces that all entries passed are indeed entry types:
 
     template<typename T>
@@ -109,6 +119,34 @@ namespace impl_t_var {
         using type = std::variant<Entries...>;
     };
 
+    // Core functionality:
+
+    template<Enum auto tag, size_t accumulator, typename... Entries>
+    struct find_tag_index_class;
+
+    template<Enum auto tag, Enum auto other, size_t accumulator, typename  T, typename... Rest>
+    struct find_tag_index_class<tag, accumulator, entry<other, T>, Rest...> {
+        static constexpr size_t value = std::conditional_t<
+                (tag == other),
+                std::integral_constant<size_t, accumulator>,
+                find_tag_index_class<tag, accumulator + 1, Rest...>
+        >::value;
+    };
+
+    template<Enum auto tag, typename... Entries>
+    struct find_tag_type_class;
+
+    template<Enum auto tag, Enum auto other, typename T, typename... Rest>
+    struct find_tag_type_class<tag, entry<other, T>, Rest...> {
+        // Lazy evaluation, to prevent recursing beyond the found solution:
+        using type = typename std::conditional_t<
+            (tag == other),
+            std::type_identity<T>,
+            find_tag_type_class<tag, Rest...>
+        >::type;
+
+    };
+
 }
 
 template<typename... Entries>
@@ -125,13 +163,36 @@ using entries_to_variant = typename impl_t_var::vector_to_variant_class<
     typename impl_t_var::entries_to_vector<Entries...>::vector>::type;
 
 template<typename... Entries>
-requires only_entries<Entries...> && safe_entries<Entries...> && !duplicate_tags<Entries...>
+using tag_type_v = typename impl_t_var::tag_type_class<Entries...>::type;
+
+// TODO: Implement Compatible_tag properly
+// template<typename T, Enum auto tag, typename... Entries>
+// concept compatible_tag = true;
+
+template<Enum auto tag, typename... Entries>
+static constexpr size_t tag_index_v = impl_t_var::find_tag_index_class<tag, 0, Entries...>::value;
+
+template<typename... Entries>
+requires only_entries<Entries...> && safe_entries<Entries...> && (!duplicate_tags<Entries...>)
 class tagged_variant {
 public:
-    using variant = entries_to_variant<Entries...>;
+    using raw_variant = entries_to_variant<Entries...>;
+    using tag_type = tag_type_v<Entries...>;
 
+    // I need to think about the constructor:
+    // For now, consider the simple case of by-value, with the tag explicitly provided:
+
+    // Need to be able to fetch the associated value
+    // Ought to be associated with a given tag, explicitly
+
+    template<Enum auto tag, typename T>
+    static tagged_variant make(T&& value) {
+        return tagged_variant(raw_variant{std::in_place_index<tag_index_v<tag, Entries...>>, std::forward<T>(value)});
+    }
 
 private:
+    explicit tagged_variant(raw_variant variant_): variant_(variant_) {}
+    raw_variant variant_;
 };
 
 
@@ -145,9 +206,11 @@ enum class test_other {
     Some, None
 };
 
-inline void test() {
+inline void test_fn() {
     using enum test;
     using shape = tagged_variant<entry<Circle, double>, entry<Rectangle, std::pair<double, double>>>;
+    static_assert(std::same_as<shape::raw_variant, std::variant<double, std::pair<double,double>>>);
+    static_assert(std::same_as<shape::tag_type, test>);
 }
 
 

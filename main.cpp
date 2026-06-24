@@ -10,6 +10,6 @@ T test_function(T x) {
 }
 
 int main() {
-    test();
+    test_fn();
     return 0;
 }
