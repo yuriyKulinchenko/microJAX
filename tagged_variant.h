@@ -1,6 +1,7 @@
 #ifndef TAGGED_VARIANT_H
 #define TAGGED_VARIANT_H
 
+#include <array>
 #include <type_traits>
 #include <variant>
 #include <concepts>
@@ -49,6 +50,15 @@ namespace impl_t_var {
 
     template<Enum auto tag, typename T>
     struct is_entry<entry<tag, T>> : std::true_type {};
+
+    template<typename Entry>
+    struct entry_tag_class;
+
+    template<Enum auto tag, typename Type>
+    struct entry_tag_class<entry<tag, Type>> {
+        static constexpr auto value = tag;
+    };
+
 
     // 'safe_entries' enforces that all entry tags come from the same enum:
 
@@ -317,10 +327,22 @@ public:
         );
     }
 
+    bool operator==(const tagged_variant& other) const {
+        return variant_ == other.variant_;
+    }
+
+    [[nodiscard]] tag_type index() const {
+        static constexpr std::array<tag_type, sizeof...(Entries)> tags {
+            impl_t_var::entry_tag_class<Entries>::value...
+        };
+        return tags[variant_.index()];
+    }
+
 private:
     template<size_t I, typename... Args>
     explicit tagged_variant(std::in_place_index_t<I> tag, Args&&... args)
     : variant_(tag, std::forward<Args>(args)...) {}
+
     raw_variant variant_;
 };
 
