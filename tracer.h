@@ -8,7 +8,7 @@
 
 class jaxpr_builder {
 public:
-    u32 new_var() {
+    u32 new_var_id() {
         return var_count++;
     }
 

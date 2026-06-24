@@ -26,40 +26,20 @@ enum class type_enum {
 class type_t {
 public:
 
-    explicit type_t(type_enum base_type):
-    base_type(base_type) {}
+    explicit type_t(type_enum base_type);
 
-    type_t(type_enum base_type, std::vector<u32> dimension):
-    base_type(base_type),
-    dimension(std::move(dimension)) {}
+    type_t(type_enum base_type, std::vector<u32> dimension);
 
-    bool operator==(const type_t& other) const {
-        return base_type == other.base_type && dimension == other.dimension;
-    }
+    bool operator==(const type_t& other) const;
 
-    bool is_i32() {
-        return base_type == type_enum::I32;
-    }
+    bool is_i32();
+    bool is_i64();
+    bool is_f32();
+    bool is_f64();
 
-    bool is_i64() {
-        return base_type == type_enum::I64;
-    }
+    type_enum get_base_type();
 
-    bool is_f32() {
-        return base_type == type_enum::F32;
-    }
-
-    bool is_f64() {
-        return base_type == type_enum::F64;
-    }
-
-    type_enum get_base_type() {
-        return base_type;
-    }
-
-    const std::vector<u32>& get_dimension() {
-        return dimension;
-    }
+    const std::vector<u32>& get_dimension();
 
 private:
     type_enum base_type;
@@ -68,19 +48,13 @@ private:
 
 class var_t {
 public:
-    explicit var_t(u32 id, type_t type): id(id), type(std::move(type)) {}
+    explicit var_t(u32 id, type_t type);
 
-    [[nodiscard]] u32 get_id() const {
-        return id;
-    }
+    [[nodiscard]] u32 get_id() const;
 
-    void set_id(u32 new_id) {
-        id = new_id;
-    }
+    void set_id(u32 new_id);
 
-    [[nodiscard]] const type_t& get_type() const {
-        return type;
-    }
+    [[nodiscard]] const type_t& get_type() const;
 
 private:
     type_t type;
@@ -135,9 +109,7 @@ public:
         return raw[idx];
     }
 
-    [[nodiscard]] const type_t& get_type() const {
-        return type;
-    }
+    [[nodiscard]] const type_t& get_type() const;
 
 private:
     type_t type;
@@ -154,20 +126,14 @@ private:
 
 class value {
 public:
-    explicit value(array_t array): variant_(std::move(array)) {}
-    explicit value(var_t var): variant_(std::move(var)) {}
+    explicit value(array_t array);
+    explicit value(var_t var);
 
-    [[nodiscard]] const type_t& get_type() const {
-        return std::visit([](auto& v) {return v.type;}, variant_);
-    }
+    [[nodiscard]] const type_t& get_type() const;
 
-    array_t& get_array() {
-        return std::get<array_t>(variant_);
-    }
+    array_t& get_array();
 
-    var_t& get_var() {
-        return std::get<var_t>(variant_);
-    }
+    var_t& get_var();
 
 private:
    std::variant<array_t, var_t> variant_;
@@ -178,10 +144,7 @@ private:
 // c:f32[] = add a b
 class equation {
 public:
-    equation(std::vector<value> input, std::vector<var_t> output, primitive_op op):
-    input(std::move(input)),
-    output(std::move(output)),
-    op(op) {}
+    equation(std::vector<value> input, std::vector<var_t> output, primitive_op op);
 
 private:
     std::vector<value> input;

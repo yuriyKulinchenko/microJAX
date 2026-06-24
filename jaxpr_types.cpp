@@ -1,0 +1,78 @@
+#include "jax_types.h"
+
+namespace jax {
+
+type_t::type_t(type_enum base_type):
+base_type(base_type) {}
+
+type_t::type_t(type_enum base_type, std::vector<u32> dimension):
+base_type(base_type),
+dimension(std::move(dimension)) {}
+
+bool type_t::operator==(const type_t& other) const {
+    return base_type == other.base_type && dimension == other.dimension;
+}
+
+bool type_t::is_i32() {
+    return base_type == type_enum::I32;
+}
+
+bool type_t::is_i64() {
+    return base_type == type_enum::I64;
+}
+
+bool type_t::is_f32() {
+    return base_type == type_enum::F32;
+}
+
+bool type_t::is_f64() {
+    return base_type == type_enum::F64;
+}
+
+type_enum type_t::get_base_type() {
+    return base_type;
+}
+
+const std::vector<u32>& type_t::get_dimension() {
+    return dimension;
+}
+
+var_t::var_t(u32 id, type_t type): id(id), type(std::move(type)) {}
+
+u32 var_t::get_id() const {
+    return id;
+}
+
+void var_t::set_id(u32 new_id) {
+    id = new_id;
+}
+
+const type_t& var_t::get_type() const {
+    return type;
+}
+
+const type_t& array_t::get_type() const {
+    return type;
+}
+
+value::value(array_t array): variant_(std::move(array)) {}
+value::value(var_t var): variant_(std::move(var)) {}
+
+const type_t& value::get_type() const {
+    return std::visit([](auto& v) -> const type_t& {return v.get_type();}, variant_);
+}
+
+array_t& value::get_array() {
+    return std::get<array_t>(variant_);
+}
+
+var_t& value::get_var() {
+    return std::get<var_t>(variant_);
+}
+
+equation::equation(std::vector<value> input, std::vector<var_t> output, primitive_op op):
+input(std::move(input)),
+output(std::move(output)),
+op(op) {}
+
+}
