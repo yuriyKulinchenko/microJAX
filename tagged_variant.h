@@ -1,6 +1,12 @@
 #ifndef TAGGED_VARIANT_H
 #define TAGGED_VARIANT_H
+
 #include <type_traits>
+#include <variant>
+#include <concepts>
+#include <utility>
+
+#include "tagged_variant.h"
 
 // tagged_variant is a wrapper around std::variant which uses enum tags to discriminate between members
 
@@ -165,12 +171,11 @@ using entries_to_variant = typename impl_t_var::vector_to_variant_class<
 template<typename... Entries>
 using tag_type_v = typename impl_t_var::tag_type_class<Entries...>::type;
 
-// TODO: Implement Compatible_tag properly
-// template<typename T, Enum auto tag, typename... Entries>
-// concept compatible_tag = true;
-
 template<Enum auto tag, typename... Entries>
 static constexpr size_t tag_index_v = impl_t_var::find_tag_index_class<tag, 0, Entries...>::value;
+
+template<Enum auto tag, typename... Entries>
+static constexpr bool tag_occurs = impl_t_var::tag_occurrence<tag, Entries...>::value;
 
 template<typename... Entries>
 requires only_entries<Entries...> && safe_entries<Entries...> && (!duplicate_tags<Entries...>)
@@ -179,27 +184,35 @@ public:
     using raw_variant = entries_to_variant<Entries...>;
     using tag_type = tag_type_v<Entries...>;
 
-    // I need to think about the constructor:
-    // For now, consider the simple case of by-value, with the tag explicitly provided:
+    template<Enum auto tag, typename... Es>
+    requires tag_occurs<tag, Es...>
+    friend auto& get(tagged_variant<Es...>& var);
 
-    // Need to be able to fetch the associated value
-    // Ought to be associated with a given tag, explicitly
-
-    template<Enum auto tag, typename T>
-    static tagged_variant make(T&& value) {
-        return tagged_variant(raw_variant{std::in_place_index<tag_index_v<tag, Entries...>>, std::forward<T>(value)});
+    template<tag_type tag, typename... Args>
+    requires tag_occurs<tag, Entries...>
+    static tagged_variant make(Args&&... value) {
+        return tagged_variant( std::in_place_index<tag_index_v<tag, Entries...>>,
+            std::forward<Args>(value)...
+        );
     }
 
 private:
-    explicit tagged_variant(raw_variant variant_): variant_(variant_) {}
+    template<size_t I, typename... Args>
+    explicit tagged_variant(std::in_place_index_t<I> tag, Args&&... args)
+    : variant_(tag, std::forward<Args>(args)...) {}
     raw_variant variant_;
 };
 
+template<Enum auto tag, typename... Entries>
+requires tag_occurs<tag, Entries...>
+auto& get(tagged_variant<Entries...>& var) {
+    return std::get<tag_index_v<tag, Entries...>>(var.variant_);
+}
 
 // TESTING:
 
 enum class test {
-    Circle, Rectangle
+    Circle, Rectangle, Triangle
 };
 
 enum class test_other {
@@ -211,6 +224,16 @@ inline void test_fn() {
     using shape = tagged_variant<entry<Circle, double>, entry<Rectangle, std::pair<double, double>>>;
     static_assert(std::same_as<shape::raw_variant, std::variant<double, std::pair<double,double>>>);
     static_assert(std::same_as<shape::tag_type, test>);
+
+    shape x = shape::make<Rectangle>(1, 5);
+
+    std::pair<double, double>& p = get<Rectangle>(x);
+    std::cout << p.first << ", " << p.second << '\n';
+
+    shape y = shape::make<Circle>(1);
+
+    double& d = get<Circle>(y);
+    std::cout << d << '\n';
 }
 
 
