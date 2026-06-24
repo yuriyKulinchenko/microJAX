@@ -153,14 +153,14 @@ namespace impl_t_var {
 
     };
 
-    // Match syntax:
+    // Match syntax: this is work-in-progress
 
     template<typename Entry, typename Function>
     struct entry_matches_function;
 
     template<Enum auto tag, typename Type, typename Function>
     struct entry_matches_function<entry<tag, Type>, Function> {
-        static constexpr bool value = true;
+        static constexpr bool value = std::invocable<Function, Type&>;
     };
 
     template<typename EntryVector, typename FunctionVector>
@@ -169,6 +169,16 @@ namespace impl_t_var {
     template<>
     struct entries_match_functions_class<type_vector<>, type_vector<>> {
         static constexpr bool value = true;
+    };
+
+    template<typename... Fs>
+    struct entries_match_functions_class<type_vector<>, type_vector<Fs...>> {
+        static constexpr bool value = false;
+    };
+
+    template<typename... Entries>
+    struct entries_match_functions_class<type_vector<Entries...>, type_vector<>> {
+        static constexpr bool value = false;
     };
 
     template<typename Entry, typename Function, typename... Entries, typename... Fs>
@@ -180,35 +190,44 @@ namespace impl_t_var {
 
 }
 
+// ===================================================== CONCEPTS =====================================================
+
 template<typename... Entries>
 concept only_entries = (impl_t_var::is_entry<Entries>::value && ...);
 
 template<typename... Entries>
 concept safe_entries = impl_t_var::safe_entries_class<Entries...>::value;
 
+template<auto tag, typename... Entries>
+concept tag_occurs = impl_t_var::tag_occurrence<tag, Entries...>::value;
+
 template<typename... Entries>
 concept duplicate_tags = impl_t_var::duplicate_tags_class<Entries...>::value;
 
+template<typename EntryVector, typename FunctionVector>
+concept entries_match_functions = impl_t_var::entries_match_functions_class<EntryVector, FunctionVector>::value;
+
+// ====================================================== TYPES =======================================================
+
 template<typename... Entries>
-using entries_to_variant = typename impl_t_var::vector_to_variant_class<
+using entries_to_variant_t = typename impl_t_var::vector_to_variant_class<
     typename impl_t_var::entries_to_vector<Entries...>::vector>::type;
 
 template<typename... Entries>
-using tag_type_v = typename impl_t_var::tag_type_class<Entries...>::type;
+using tag_type_t = typename impl_t_var::tag_type_class<Entries...>::type;
+
+// ====================================================== VALUES ======================================================
 
 template<Enum auto tag, typename... Entries>
 static constexpr size_t tag_index_v = impl_t_var::find_tag_index_class<tag, 0, Entries...>::value;
-
-template<Enum auto tag, typename... Entries>
-static constexpr bool tag_occurs = impl_t_var::tag_occurrence<tag, Entries...>::value;
 
 template<typename... Entries>
 requires only_entries<Entries...> && safe_entries<Entries...> && (!duplicate_tags<Entries...>)
 class tagged_variant {
     static_assert(sizeof...(Entries) > 0, "tagged_variant cannot be instantiated with no entries");
 public:
-    using raw_variant = entries_to_variant<Entries...>;
-    using tag_type = tag_type_v<Entries...>;
+    using raw_variant = entries_to_variant_t<Entries...>;
+    using tag_type = tag_type_t<Entries...>;
 
     template<Enum auto tag, typename... Entries_>
     requires tag_occurs<tag, Entries_...>
@@ -220,10 +239,10 @@ public:
 
 
     template<size_t index, typename... Entries_, typename F_>
-    friend auto match(tagged_variant<Entries_...>& var, F_ f);
+    friend auto match_(tagged_variant<Entries_...>& var, F_ f);
 
     template<size_t index, typename... Entries_, typename F_, typename... Fs_>
-    friend auto match(tagged_variant<Entries_...>& var, F_ f, Fs_... fs);
+    friend auto match_(tagged_variant<Entries_...>& var, F_ f, Fs_... fs);
 
     template<tag_type tag, typename... Args>
     requires tag_occurs<tag, Entries...>
@@ -258,38 +277,28 @@ enum class test {
     Circle, Rectangle, Triangle
 };
 
-enum class test_other {
-    Some, None
-};
-
-/*
-
-desired match syntax:
-
-match(v, [](auto& radius) {...}, [](auto& ...))
-
-*/
-
-// Goal 1: enforce certain constraints on the Fs
-// Create a templated struct 'entries_match_functions_class'
-// The struct will take 2 type_vectors, entries and functions
-// This will iterate through both type vectors simultaneously,
-
 template<size_t index, typename... Entries, typename F>
-auto match(tagged_variant<Entries...>& var, F f) {
+auto match_(tagged_variant<Entries...>& var, F f) {
     if (var.variant_.index() == index) {
-        return f(var);
+        return f(std::get<index>(var.variant_));
     }
     throw std::bad_variant_access{};
 }
 
-template<size_t index = 0, typename... Entries, typename F, typename... Fs>
-auto match(tagged_variant<Entries...>& var, F f, Fs... fs) {
+template<size_t index, typename... Entries, typename F, typename... Fs>
+auto match_(tagged_variant<Entries...>& var, F f, Fs... fs) {
     if (var.variant_.index() == index) {
-        return f(var);
+        return f(std::get<index>(var.variant_));
     }
-    return match<index + 1>(var, fs...);
+    return match_<index + 1>(var, fs...);
 }
+
+template<typename... Entries, typename... Fs>
+requires entries_match_functions<impl_t_var::type_vector<Entries...>, impl_t_var::type_vector<Fs...>>
+auto match(tagged_variant<Entries...>& var, Fs... fs) {
+    return match_<0>(var, fs...);
+}
+
 
 inline void test_fn() {
     using enum test;
@@ -315,18 +324,17 @@ inline void test_fn() {
     std::variant<std::string, double> h {"Hello world!"};
 
     auto z = match(x,
-        [] (auto& v) {
+        [] (double& v) {
             return "Circle";
         },
-        [](auto& v) {
+        [](std::pair<double, double>& v) {
             return "Rectangle";
         },
-        [](auto& v) {
+        [](std::tuple<double, double, double>& v) {
             return "Triangle";
         }
     );
-
-    std::cout << z;
+    std::puts(z);
 }
 
 
