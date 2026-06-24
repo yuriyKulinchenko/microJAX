@@ -169,12 +169,28 @@ namespace impl_t_var {
         static constexpr bool value = std::invocable<Function, Type&>;
     };
 
+    template<typename Entry, typename Function>
+    struct entry_matches_function_const;
+
+    template<Enum auto tag, typename Type, typename Function>
+    struct entry_matches_function_const<entry<tag, Type>, Function> {
+        static constexpr bool value = std::invocable<Function, const Type&>;
+    };
+
     template<typename EntryVector, typename FunctionVector>
     struct entries_match_functions_class;
 
     template<typename... Entries, typename... Functions>
     struct entries_match_functions_class<type_vector<Entries...>, type_vector<Functions...>> {
         static constexpr bool value = (entry_matches_function<Entries, Functions>::value && ...);
+    };
+
+    template<typename EntryVector, typename FunctionVector>
+    struct entries_match_functions_const_class;
+
+    template<typename... Entries, typename... Functions>
+    struct entries_match_functions_const_class<type_vector<Entries...>, type_vector<Functions...>> {
+        static constexpr bool value = (entry_matches_function_const<Entries, Functions>::value && ...);
     };
 
     // All outputs of a match expression must have a shared type:
@@ -187,12 +203,28 @@ namespace impl_t_var {
         using type = std::invoke_result_t<Function, Type&>;
     };
 
+    template<typename Entry, typename Function>
+    struct output_type_const_class;
+
+    template<Enum auto tag, typename Type, typename Function>
+    struct output_type_const_class<entry<tag, Type>, Function> {
+        using type = std::invoke_result_t<Function, const Type&>;
+    };
+
     template<typename EntryVector, typename FunctionVector>
     struct outputs_type_class;
 
     template<typename... Entries, typename... Functions>
     struct outputs_type_class<type_vector<Entries...>, type_vector<Functions...>> {
         using type = std::common_type_t<typename output_type_class<Entries, Functions>::type...>;
+    };
+
+    template<typename EntryVector, typename FunctionVector>
+    struct outputs_type_const_class;
+
+    template<typename... Entries, typename... Functions>
+    struct outputs_type_const_class<type_vector<Entries...>, type_vector<Functions...>> {
+        using type = std::common_type_t<typename output_type_const_class<Entries, Functions>::type...>;
     };
 
 }
@@ -214,6 +246,9 @@ concept duplicate_tags = impl_t_var::duplicate_tags_class<Entries...>::value;
 template<typename EntryVector, typename FunctionVector>
 concept entries_match_functions = impl_t_var::entries_match_functions_class<EntryVector, FunctionVector>::value;
 
+template<typename EntryVector, typename FunctionVector>
+concept entries_match_functions_const = impl_t_var::entries_match_functions_const_class<EntryVector, FunctionVector>::value;
+
 // ====================================================== TYPES =======================================================
 
 template<typename... Entries>
@@ -225,6 +260,9 @@ using tag_type_t = typename impl_t_var::tag_type_class<Entries...>::type;
 
 template<typename EntryVector, typename FunctionVector>
 using output_type_t = typename impl_t_var::outputs_type_class<EntryVector, FunctionVector>::type;
+
+template<typename EntryVector, typename FunctionVector>
+using output_type_const_t = typename impl_t_var::outputs_type_const_class<EntryVector, FunctionVector>::type;
 
 // ====================================================== VALUES ======================================================
 
@@ -253,6 +291,12 @@ public:
 
     template<size_t index, typename Ret_, typename... Entries_, typename F_, typename... Fs_>
     friend Ret_ match_(tagged_variant<Entries_...>& var, F_ f, Fs_... fs);
+
+    template<size_t index, typename Ret_, typename... Entries_, typename F_>
+    friend Ret_ match_const_(const tagged_variant<Entries_...>& var, F_ f);
+
+    template<size_t index, typename Ret_, typename... Entries_, typename F_, typename... Fs_>
+    friend Ret_ match_const_(const tagged_variant<Entries_...>& var, F_ f, Fs_... fs);
 
     template<tag_type tag, typename... Args>
     requires tag_occurs<tag, Entries...>
@@ -295,6 +339,14 @@ Ret match_(tagged_variant<Entries...>& var, F f) {
     throw std::bad_variant_access{};
 }
 
+template<size_t index, typename Ret, typename... Entries, typename F>
+Ret match_const_(const tagged_variant<Entries...>& var, F f) {
+    if (var.variant_.index() == index) {
+        return f(std::get<index>(var.variant_));
+    }
+    throw std::bad_variant_access{};
+}
+
 template<size_t index, typename Ret, typename... Entries, typename F, typename... Fs>
 Ret match_(tagged_variant<Entries...>& var, F f, Fs... fs) {
     if (var.variant_.index() == index) {
@@ -303,13 +355,30 @@ Ret match_(tagged_variant<Entries...>& var, F f, Fs... fs) {
     return match_<index + 1, Ret>(var, fs...);
 }
 
-template<typename... Entries, typename... Fs>
-requires entries_match_functions<impl_t_var::type_vector<Entries...>, impl_t_var::type_vector<Fs...>>
-&& requires {typename output_type_t< impl_t_var::type_vector<Entries...>, impl_t_var::type_vector<Fs...>>;}
+template<size_t index, typename Ret, typename... Entries, typename F, typename... Fs>
+Ret match_const_(const tagged_variant<Entries...>& var, F f, Fs... fs) {
+    if (var.variant_.index() == index) {
+        return f(std::get<index>(var.variant_));
+    }
+    return match_const_<index + 1, Ret>(var, fs...);
+}
 
-auto match(tagged_variant<Entries...>& var, Fs... fs) {
+template<typename... Entries, typename... Fs>
+requires (sizeof...(Entries) == sizeof...(Fs))
+&& entries_match_functions<impl_t_var::type_vector<Entries...>, impl_t_var::type_vector<Fs...>>
+&& requires {typename output_type_t< impl_t_var::type_vector<Entries...>, impl_t_var::type_vector<Fs...>>;}
+auto match(tagged_variant<Entries...>& var, Fs&&... fs) {
     using Ret = output_type_t<impl_t_var::type_vector<Entries...>, impl_t_var::type_vector<Fs...>>;
-    return match_<0, Ret>(var, fs...);
+    return match_<0, Ret>(var, std::forward<Fs>(fs)...);
+}
+
+template<typename... Entries, typename... Fs>
+requires (sizeof...(Entries) == sizeof...(Fs))
+&& entries_match_functions_const<impl_t_var::type_vector<Entries...>, impl_t_var::type_vector<Fs...>>
+&& requires {typename output_type_const_t< impl_t_var::type_vector<Entries...>, impl_t_var::type_vector<Fs...>>;}
+auto match(const tagged_variant<Entries...>& var, Fs&&... fs) {
+    using Ret = output_type_const_t<impl_t_var::type_vector<Entries...>, impl_t_var::type_vector<Fs...>>;
+    return match_const_<0, Ret>(var, std::forward<Fs>(fs)...);
 }
 
 inline void test_fn() {
@@ -324,16 +393,7 @@ inline void test_fn() {
         std::variant<double, std::pair<double,double>, std::tuple<double, double, double>>>);
     static_assert(std::same_as<shape::tag_type, test>);
 
-    shape x = shape::make<Rectangle>(1, 5);
-    shape y = shape::make<Circle>(1);
-
-    std::pair<double, double> dimensions = get<Rectangle>(x);
-    double radius = get<Circle>(y);
-
-    std::println("Rectangle dimensions: {} x {}", dimensions.first, dimensions.second);
-    std::println("circle radius: {}", radius);
-
-    std::variant<std::string, double> h {"Hello world!"};
+    shape x = shape::make<Circle>(5);
 
     auto z = match(x,
         [] (double& v) {
