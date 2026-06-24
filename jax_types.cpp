@@ -2,6 +2,24 @@
 
 namespace jax {
 
+std::string_view to_string(primitive_op op) {
+    switch (op) {
+#define X(name) case primitive_op::name: return #name;
+        PRIMITIVE_OP_LIST(X)
+#undef X
+    }
+    return "";
+}
+
+std::string_view to_string(type_enum t) {
+    switch (t) {
+#define X(name) case type_enum::name: return #name;
+        TYPE_ENUM_LIST(X)
+#undef X
+    }
+    return "";
+}
+
 type_t::type_t(type_enum base_type):
 base_type(base_type) {}
 
@@ -29,11 +47,11 @@ bool type_t::is_f64() {
     return base_type == type_enum::F64;
 }
 
-type_enum type_t::get_base_type() {
+type_enum type_t::get_base_type() const {
     return base_type;
 }
 
-const std::vector<u32>& type_t::get_dimension() {
+const std::vector<u32>& type_t::get_dimension() const {
     return dimension;
 }
 
@@ -55,6 +73,15 @@ const type_t& array_t::get_type() const {
     return type;
 }
 
+const vector_variant &array_t::get_value() const {
+    return value;
+}
+
+vector_variant &array_t::get_value() {
+    return value;
+}
+
+
 value::value(array_t array): variant_(std::move(array)) {}
 value::value(var_t var): variant_(std::move(var)) {}
 
@@ -68,6 +95,18 @@ array_t& value::get_array() {
 
 var_t& value::get_var() {
     return std::get<var_t>(variant_);
+}
+
+const std::vector<value> &equation::get_input() const {
+    return input;
+}
+
+const std::vector<var_t> &equation::get_output() const {
+    return output;
+}
+
+primitive_op equation::get_op() const {
+    return op;
 }
 
 equation::equation(std::vector<value> input, std::vector<var_t> output, primitive_op op):

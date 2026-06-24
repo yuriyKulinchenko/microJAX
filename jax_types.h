@@ -1,10 +1,9 @@
 #ifndef JAXPR_TYPES_H
 #define JAXPR_TYPES_H
 #include <any>
+#include <string_view>
 #include <variant>
 #include <vector>
-
-// TODO: re-use formatted exceptions from prolog interpreter
 
 using u32 = uint32_t;
 using u64 = uint64_t;
@@ -15,13 +14,26 @@ using f64 = double;
 
 namespace jax {
 
+#define PRIMITIVE_OP_LIST(X) \
+    X(ADD) X(SUB) X(MUL) X(SIN) X(COS) X(EXP) X(LOG)
+
+#define TYPE_ENUM_LIST(X) \
+    X(I32) X(I64) X(F32) X(F64)
+
 enum class primitive_op {
-    ADD, SUB, MUL, SIN, COS, EXP, LOG
+#define X(name) name,
+    PRIMITIVE_OP_LIST(X)
+#undef X
 };
 
 enum class type_enum {
-    I32, I64, F32, F64
+#define X(name) name,
+    TYPE_ENUM_LIST(X)
+#undef X
 };
+
+std::string_view to_string(primitive_op op);
+std::string_view to_string(type_enum t);
 
 class type_t {
 public:
@@ -37,9 +49,8 @@ public:
     bool is_f32();
     bool is_f64();
 
-    type_enum get_base_type();
-
-    const std::vector<u32>& get_dimension();
+    type_enum get_base_type() const;
+    const std::vector<u32>& get_dimension() const;
 
 private:
     type_enum base_type;
@@ -63,10 +74,15 @@ private:
 
 #define check_type(T_real, T_enum)                          \
 if constexpr (std::is_same_v<T, T_real>) {                  \
-    if(type.get_base_type() != type_enum::T_enum) {        \
+    if(type.get_base_type() != type_enum::T_enum) {         \
         throw std::logic_error("Error: type mismatch");     \
     }                                                       \
 }
+
+using vector_variant = std::variant<
+    std::vector<i32>, std::vector<i64>,
+    std::vector<f32>,std::vector<f64>
+>;
 
 class array_t {
 public:
@@ -110,15 +126,12 @@ public:
     }
 
     [[nodiscard]] const type_t& get_type() const;
+    [[nodiscard]] const vector_variant& get_value() const;
+    [[nodiscard]] vector_variant& get_value();
 
 private:
     type_t type;
-    std::variant<
-        std::vector<i32>,
-        std::vector<i64>,
-        std::vector<f32>,
-        std::vector<f64>
-    > value;
+    vector_variant value;
     std::vector<u32> strides;
 };
 
@@ -145,6 +158,11 @@ private:
 class equation {
 public:
     equation(std::vector<value> input, std::vector<var_t> output, primitive_op op);
+
+    [[nodiscard]] const std::vector<value>& get_input() const;
+    [[nodiscard]] const std::vector<var_t>& get_output() const;
+    [[nodiscard]] primitive_op get_op() const;
+
 
 private:
     std::vector<value> input;

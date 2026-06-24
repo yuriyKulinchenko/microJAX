@@ -6,11 +6,13 @@
 
 #include "jax_types.h"
 
+class jaxpr_tracer;
+
 class jaxpr_builder {
 public:
-    u32 new_var_id() {
-        return var_count++;
-    }
+    u32 new_var_id();
+    jaxpr_tracer get_tracer(jax::type_t type);
+    [[nodiscard]] jax::expression&& get_jaxpr();
 
     jax::expression jaxpr;
     u32 var_count = 0;
@@ -36,9 +38,9 @@ public:
     friend jaxpr_tracer operator*(const jaxpr_tracer&, const jax::array_t&);
     friend jaxpr_tracer operator*(const jax::array_t&, const jaxpr_tracer&);
 
-    jaxpr_tracer sin();
-    jaxpr_tracer cos();
-    jaxpr_tracer exp();
+    [[nodiscard]] jaxpr_tracer sin() const;
+    [[nodiscard]] jaxpr_tracer cos() const;
+    [[nodiscard]] jaxpr_tracer exp() const;
 private:
     jax::var_t var;
     jaxpr_builder& builder;

@@ -1,5 +1,6 @@
 #ifndef JAX_FUNCTIONS_H
 #define JAX_FUNCTIONS_H
+
 #include <type_traits>
 #include <valarray>
 

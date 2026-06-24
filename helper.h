@@ -1,7 +1,10 @@
 #ifndef HELPER_H
 #define HELPER_H
 
+#include <algorithm>
 #include <ranges>
+#include <string>
+#include <string_view>
 #include <vector>
 #include <fstream>
 #include <unordered_map>
@@ -12,6 +15,12 @@
 #define RED     "\033[31m"
 #define GREEN   "\033[32m"
 #define RESET   "\033[0m"
+
+inline std::string to_lower(std::string_view s) {
+    std::string result(s);
+    std::ranges::transform(result, result.begin(), [](unsigned char c) { return std::tolower(c); });
+    return result;
+}
 
 template <typename T>
 std::ostream& operator<<(std::ostream& stream, const std::vector<T>& vector) {

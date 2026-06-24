@@ -63,14 +63,27 @@ ELEMENTWISE_BINARY_OP(+, jax::primitive_op::ADD);
 ELEMENTWISE_BINARY_OP(*, jax::primitive_op::MUL);
 ELEMENTWISE_BINARY_OP(-, jax::primitive_op::SUB);
 
-jaxpr_tracer jaxpr_tracer::sin() {
+jaxpr_tracer jaxpr_tracer::sin() const {
     return unary_op(jax::value{var}, jax::primitive_op::SIN, builder);
 }
 
-jaxpr_tracer jaxpr_tracer::cos() {
+jaxpr_tracer jaxpr_tracer::cos() const {
     return unary_op(jax::value{var}, jax::primitive_op::COS, builder);
 }
 
-jaxpr_tracer jaxpr_tracer::exp() {
+jaxpr_tracer jaxpr_tracer::exp() const {
     return unary_op(jax::value{var}, jax::primitive_op::EXP, builder);
+}
+
+u32 jaxpr_builder::new_var_id() {
+    return var_count++;
+}
+
+jaxpr_tracer jaxpr_builder::get_tracer(jax::type_t type) {
+    return {*this, jax::var_t{new_var_id(), std::move(type)}};
+}
+
+jax::expression&& jaxpr_builder::get_jaxpr() {
+    var_count = 0;
+    return std::move(jaxpr);
 }
