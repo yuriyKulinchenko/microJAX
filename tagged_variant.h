@@ -153,6 +153,31 @@ namespace impl_t_var {
 
     };
 
+    // Match syntax:
+
+    template<typename Entry, typename Function>
+    struct entry_matches_function;
+
+    template<Enum auto tag, typename Type, typename Function>
+    struct entry_matches_function<entry<tag, Type>, Function> {
+        static constexpr bool value = true;
+    };
+
+    template<typename EntryVector, typename FunctionVector>
+    struct entries_match_functions_class;
+
+    template<>
+    struct entries_match_functions_class<type_vector<>, type_vector<>> {
+        static constexpr bool value = true;
+    };
+
+    template<typename Entry, typename Function, typename... Entries, typename... Fs>
+    struct entries_match_functions_class<type_vector<Entry, Entries...>, type_vector<Function, Fs...>> {
+        static constexpr bool value = entry_matches_function<Entry, Function>::value
+            && entries_match_functions_class<type_vector<Entries...>, type_vector<Fs...>>::value;
+    };
+
+
 }
 
 template<typename... Entries>
@@ -180,13 +205,25 @@ static constexpr bool tag_occurs = impl_t_var::tag_occurrence<tag, Entries...>::
 template<typename... Entries>
 requires only_entries<Entries...> && safe_entries<Entries...> && (!duplicate_tags<Entries...>)
 class tagged_variant {
+    static_assert(sizeof...(Entries) > 0, "tagged_variant cannot be instantiated with no entries");
 public:
     using raw_variant = entries_to_variant<Entries...>;
     using tag_type = tag_type_v<Entries...>;
 
-    template<Enum auto tag, typename... Es>
-    requires tag_occurs<tag, Es...>
-    friend auto& get(tagged_variant<Es...>& var);
+    template<Enum auto tag, typename... Entries_>
+    requires tag_occurs<tag, Entries_...>
+    friend auto& get(tagged_variant<Entries_...>& var);
+
+    template<Enum auto tag, typename... Entries_>
+    requires tag_occurs<tag, Entries_...>
+    friend const auto& get(const tagged_variant<Entries_...>& var);
+
+
+    template<size_t index, typename... Entries_, typename F_>
+    friend auto match(tagged_variant<Entries_...>& var, F_ f);
+
+    template<size_t index, typename... Entries_, typename F_, typename... Fs_>
+    friend auto match(tagged_variant<Entries_...>& var, F_ f, Fs_... fs);
 
     template<tag_type tag, typename... Args>
     requires tag_occurs<tag, Entries...>
@@ -209,6 +246,12 @@ auto& get(tagged_variant<Entries...>& var) {
     return std::get<tag_index_v<tag, Entries...>>(var.variant_);
 }
 
+template<Enum auto tag, typename... Entries>
+requires tag_occurs<tag, Entries...>
+const auto& get(const tagged_variant<Entries...>& var) {
+    return std::get<tag_index_v<tag, Entries...>>(var.variant_);
+}
+
 // TESTING:
 
 enum class test {
@@ -219,21 +262,71 @@ enum class test_other {
     Some, None
 };
 
+/*
+
+desired match syntax:
+
+match(v, [](auto& radius) {...}, [](auto& ...))
+
+*/
+
+// Goal 1: enforce certain constraints on the Fs
+// Create a templated struct 'entries_match_functions_class'
+// The struct will take 2 type_vectors, entries and functions
+// This will iterate through both type vectors simultaneously,
+
+template<size_t index, typename... Entries, typename F>
+auto match(tagged_variant<Entries...>& var, F f) {
+    if (var.variant_.index() == index) {
+        return f(var);
+    }
+    throw std::bad_variant_access{};
+}
+
+template<size_t index = 0, typename... Entries, typename F, typename... Fs>
+auto match(tagged_variant<Entries...>& var, F f, Fs... fs) {
+    if (var.variant_.index() == index) {
+        return f(var);
+    }
+    return match<index + 1>(var, fs...);
+}
+
 inline void test_fn() {
     using enum test;
-    using shape = tagged_variant<entry<Circle, double>, entry<Rectangle, std::pair<double, double>>>;
-    static_assert(std::same_as<shape::raw_variant, std::variant<double, std::pair<double,double>>>);
+    using shape = tagged_variant<
+        entry<Circle, double>,
+        entry<Rectangle, std::pair<double, double>>,
+        entry<Triangle, std::tuple<double, double, double>>
+    >;
+
+    static_assert(std::same_as<shape::raw_variant,
+        std::variant<double, std::pair<double,double>, std::tuple<double, double, double>>>);
     static_assert(std::same_as<shape::tag_type, test>);
 
     shape x = shape::make<Rectangle>(1, 5);
-
-    std::pair<double, double>& p = get<Rectangle>(x);
-    std::cout << p.first << ", " << p.second << '\n';
-
     shape y = shape::make<Circle>(1);
 
-    double& d = get<Circle>(y);
-    std::cout << d << '\n';
+    std::pair<double, double> dimensions = get<Rectangle>(x);
+    double radius = get<Circle>(y);
+
+    std::println("Rectangle dimensions: {} x {}", dimensions.first, dimensions.second);
+    std::println("circle radius: {}", radius);
+
+    std::variant<std::string, double> h {"Hello world!"};
+
+    auto z = match(x,
+        [] (auto& v) {
+            return "Circle";
+        },
+        [](auto& v) {
+            return "Rectangle";
+        },
+        [](auto& v) {
+            return "Triangle";
+        }
+    );
+
+    std::cout << z;
 }
 
 
