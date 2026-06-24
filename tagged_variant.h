@@ -285,6 +285,17 @@ public:
     requires tag_occurs<tag, Entries_...>
     friend const auto& get(const tagged_variant<Entries_...>& var);
 
+    template<Enum auto tag, typename... Entries_>
+    requires tag_occurs<tag, Entries_...>
+    friend auto* get_if(tagged_variant<Entries_...>* var);
+
+    template<Enum auto tag, typename... Entries_>
+    requires tag_occurs<tag, Entries_...>
+    friend const auto* get_if(const tagged_variant<Entries_...>* var);
+
+    template<Enum auto tag, typename... Entries_>
+    requires tag_occurs<tag, Entries_...>
+    friend bool holds_alternative(const tagged_variant<Entries_...>& var);
 
     template<size_t index, typename Ret_, typename... Entries_, typename F_>
     friend Ret_ match_(tagged_variant<Entries_...>& var, F_ f);
@@ -323,6 +334,24 @@ template<Enum auto tag, typename... Entries>
 requires tag_occurs<tag, Entries...>
 const auto& get(const tagged_variant<Entries...>& var) {
     return std::get<tag_index_v<tag, Entries...>>(var.variant_);
+}
+
+template<Enum auto tag, typename... Entries>
+requires tag_occurs<tag, Entries...>
+auto* get_if(tagged_variant<Entries...>* var) {
+    return std::get_if<tag_index_v<tag, Entries...>>(&var->variant_);
+}
+
+template<Enum auto tag, typename... Entries>
+requires tag_occurs<tag, Entries...>
+const auto* get_if(const tagged_variant<Entries...>* var) {
+    return std::get_if<tag_index_v<tag, Entries...>>(&var->variant_);
+}
+
+template<Enum auto tag, typename... Entries>
+requires tag_occurs<tag, Entries...>
+bool holds_alternative(const tagged_variant<Entries...>& var) {
+    return tag_index_v<tag, Entries...> == var.variant_.index();
 }
 
 // TESTING:
