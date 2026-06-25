@@ -154,7 +154,7 @@ void expression::add_equation(equation eq) {
 }
 
 u32 expression::new_var_id() {
-    return var_id;
+    return var_id++;
 }
 
 

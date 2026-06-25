@@ -15,7 +15,7 @@ using f64 = double;
 namespace jax {
 
 #define PRIMITIVE_OP_LIST(X) \
-    X(ADD) X(SUB) X(MUL) X(SIN) X(COS) X(EXP) X(LOG)
+    X(ADD) X(SUB) X(MUL) X(SIN) X(COS) X(EXP) X(LOG) X(NEG)
 
 #define TYPE_ENUM_LIST(X) \
     X(I32) X(I64) X(F32) X(F64)
