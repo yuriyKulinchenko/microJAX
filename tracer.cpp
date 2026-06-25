@@ -79,8 +79,26 @@ u32 jaxpr_builder::new_var_id() {
     return var_count++;
 }
 
-jaxpr_tracer jaxpr_builder::get_tracer(jax::type_t type) {
-    return {*this, jax::var_t{new_var_id(), std::move(type)}};
+jaxpr_tracer jaxpr_builder::register_tracer(jax::type_t type) {
+    auto var = jax::var_t{new_var_id(), std::move(type)};
+    jaxpr.invars.push_back(var);
+    return {*this, std::move(var)};
+}
+
+void jaxpr_builder::register_output(const jaxpr_tracer& tracer) {
+    jaxpr.outvals.push_back(jax::value{tracer.get_var()});
+}
+
+void jaxpr_builder::register_output(const jax::value& value) {
+    jaxpr.outvals.push_back(value);
+}
+
+void jaxpr_builder::register_output(const jax::array_t& array) {
+    jaxpr.outvals.push_back(jax::value{array});
+}
+
+void jaxpr_builder::register_output(const jax::var_t& var) {
+    jaxpr.outvals.push_back(jax::value{var});
 }
 
 jax::expression&& jaxpr_builder::get_jaxpr() {

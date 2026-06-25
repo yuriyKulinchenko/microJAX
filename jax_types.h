@@ -180,8 +180,9 @@ private:
     primitive_op op;
 };
 
-class expression {
-public:
+struct expression {
+    std::vector<var_t> invars;
+    std::vector<value> outvals;
     std::vector<equation> equations;
 };
 

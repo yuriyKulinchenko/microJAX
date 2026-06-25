@@ -12,4 +12,5 @@ add_executable(microJAX main.cpp
         helper.h
         jax_logger.cpp
         jax_logger.h
-        tagged_variant.h)
+        tagged_variant.h
+        grad.h)

@@ -5,6 +5,7 @@
 #include <type_traits>
 #include <variant>
 #include <concepts>
+#include <cstdio>
 #include <utility>
 
 // tagged_variant is a wrapper around std::variant which uses enum tags to discriminate between members
