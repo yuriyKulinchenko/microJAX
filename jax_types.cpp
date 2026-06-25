@@ -153,4 +153,9 @@ void expression::add_equation(equation eq) {
     equations.push_back(std::move(eq));
 }
 
+u32 expression::new_var_id() {
+    return var_id;
+}
+
+
 }

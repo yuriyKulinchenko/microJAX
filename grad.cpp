@@ -34,10 +34,12 @@ jax::expression grad(const jax::expression& expr) {
     return instance.find_grad();
 }
 
-grad_class::grad_class(const jax::expression& expr): input_expr(expr), var_id_index(input_expr.max_var_id + 1) {}
+grad_class::grad_class(const jax::expression& expr): input_expr(expr) {
+    output_expr.var_id = expr.var_id;
+}
 
 void grad_class::introduce_adjoint(const jax::var_t& var) {
-    variable_adjoint_map[var.get_id()] = var_id_index++;
+    variable_adjoint_map[var.get_id()] = output_expr.new_var_id();
 }
 
 

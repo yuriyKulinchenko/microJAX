@@ -43,8 +43,6 @@ private:
 
 class jaxpr_builder {
 public:
-    u32 new_var_id();
-
     jaxpr_tracer register_tracer(jax::type_t type);
     void register_output(const jaxpr_tracer& tracer);
     void register_output(const jax::value& value);
@@ -60,7 +58,6 @@ public:
     [[nodiscard]] jax::expression&& get_jaxpr();
 
     jax::expression jaxpr;
-    u32 var_count = 0;
 };
 
 #endif //TRACER_H

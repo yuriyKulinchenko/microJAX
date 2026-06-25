@@ -6,7 +6,7 @@ jaxpr_tracer elementwise_binary_op(
     jax::primitive_op op,
     jaxpr_builder& builder
     ) {
-    jax::var_t new_var {builder.new_var_id(), v1.get_type()};
+    jax::var_t new_var {builder.jaxpr.new_var_id(), v1.get_type()};
 
     builder.jaxpr.equations.emplace_back(
         std::vector{v1, v2},
@@ -18,7 +18,7 @@ jaxpr_tracer elementwise_binary_op(
 }
 
 jaxpr_tracer unary_op(const jax::value& val, jax::primitive_op op, jaxpr_builder& builder) {
-    jax::var_t new_var {builder.new_var_id(), val.get_type()};
+    jax::var_t new_var {builder.jaxpr.new_var_id(), val.get_type()};
 
     builder.jaxpr.equations.emplace_back(
         std::vector{val},
@@ -75,12 +75,8 @@ jaxpr_tracer jaxpr_tracer::exp() const {
     return unary_op(jax::value{var}, jax::primitive_op::EXP, builder);
 }
 
-u32 jaxpr_builder::new_var_id() {
-    return (jaxpr.max_var_id = var_count++);
-}
-
 jaxpr_tracer jaxpr_builder::register_tracer(jax::type_t type) {
-    auto var = jax::var_t{new_var_id(), std::move(type)};
+    auto var = jax::var_t{jaxpr.new_var_id(), std::move(type)};
     jaxpr.invars.push_back(var);
     return {*this, std::move(var)};
 }
@@ -102,6 +98,5 @@ void jaxpr_builder::register_output(const jax::var_t& var) {
 }
 
 jax::expression&& jaxpr_builder::get_jaxpr() {
-    var_count = 0;
     return std::move(jaxpr);
 }
