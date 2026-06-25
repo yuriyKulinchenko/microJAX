@@ -39,8 +39,27 @@ inline std::ostream& operator<<(std::ostream& stream, jax::equation& eq) {
 
     stream << "= " << to_lower(jax::to_string(eq.get_op())) << ' ';
 
-    // TODO: Finish input
+    for (int i = 0; i < eq.get_input().size(); i++) {
+        const jax::value& input = eq.get_input()[i];
+        if (input.is<jax::array_t>()) {
+            const jax::array_t& array = input.get_array();
+            stream << array << ':' << array.get_type();
+        } else {
+            // jax::var_t
+            stream << input.get_var();
+        }
+        if (i != eq.get_input().size() - 1) stream << ' ';
+    }
 
+    return stream;
+}
+
+inline std::ostream& operator<<(std::ostream& stream, jax::expression& expr) {
+    stream << "{\n";
+    for (auto& eq: expr.equations) {
+        stream << "    " << eq << '\n';
+    }
+    stream << "}\n";
     return stream;
 }
 

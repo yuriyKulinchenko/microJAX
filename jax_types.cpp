@@ -69,6 +69,25 @@ const type_t& var_t::get_type() const {
     return type;
 }
 
+array_t::array_t(f32 value)
+: array_t(type_t{type_enum::F32}, std::vector<f32>{value}) {}
+
+void array_t::compute_strides() {
+    const std::vector<u32>& dimension = type.get_dimension();
+    strides.resize(dimension.size());
+    if (strides.empty()) {
+        return;
+    }
+
+    // Strides are calculated backwards:
+
+    strides[strides.size() - 1] = 1;
+    for (size_t i = strides.size() - 1; i-->0;) {
+        strides[i] = strides[i + 1] * dimension[i + 1];
+    }
+}
+
+
 const type_t& array_t::get_type() const {
     return type;
 }
@@ -89,11 +108,11 @@ const type_t& value::get_type() const {
     return std::visit([](auto& v) -> const type_t& {return v.get_type();}, variant_);
 }
 
-array_t& value::get_array() {
+const array_t& value::get_array() const {
     return std::get<array_t>(variant_);
 }
 
-var_t& value::get_var() {
+const var_t& value::get_var() const {
     return std::get<var_t>(variant_);
 }
 
@@ -103,6 +122,14 @@ const std::vector<value> &equation::get_input() const {
 
 const std::vector<var_t> &equation::get_output() const {
     return output;
+}
+
+const value &equation::get_input(size_t i) const {
+    return input[i];
+}
+
+const var_t &equation::get_output(size_t i) const {
+    return output[i];
 }
 
 primitive_op equation::get_op() const {

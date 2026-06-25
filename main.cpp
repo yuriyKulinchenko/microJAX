@@ -2,14 +2,19 @@
 
 #include "jax_types.h"
 #include "jax_functions.h"
-#include "tagged_variant.h"
+#include "tracer.h"
+#include "jax_logger.h"
 
 template<typename T>
 T test_function(T x) {
-    return jax::sin(x) + jax::cos(x);
+    return jax::sin(x) + jax::cos(x) + 1;
 }
 
 int main() {
-    test_fn();
+    // Construct tracer:
+    jaxpr_builder builder {};
+    jaxpr_tracer tracer = builder.get_tracer(jax::type_enum::F32);
+    test_function<jaxpr_tracer>(tracer);
+    std::cout << builder.jaxpr;
     return 0;
 }

@@ -42,6 +42,11 @@ public:
 
     type_t(type_enum base_type, std::vector<u32> dimension);
 
+    template<std::convertible_to<u32>... Dims>
+    explicit type_t(type_enum base_type, Dims... dimension)
+    : base_type(base_type), dimension{static_cast<u32>(dimension)...} {}
+
+
     bool operator==(const type_t& other) const;
 
     bool is_i32();
@@ -49,8 +54,8 @@ public:
     bool is_f32();
     bool is_f64();
 
-    type_enum get_base_type() const;
-    const std::vector<u32>& get_dimension() const;
+    [[nodiscard]] type_enum get_base_type() const;
+    [[nodiscard]] const std::vector<u32>& get_dimension() const;
 
 private:
     type_enum base_type;
@@ -87,22 +92,19 @@ using vector_variant = std::variant<
 class array_t {
 public:
     template<typename T>
-    explicit array_t(type_t type, std::vector<T> value):
+    array_t(type_t type, std::vector<T> value):
     type(std::move(type)),
-    value(std::move(value)),
-    strides(std::vector<u32>(type.get_dimension().size())) {
+    value(std::move(value)) {
         check_type(i32, I32);
         check_type(i64, I64);
         check_type(f32, F32);
         check_type(f64, F64);
 
-        // Strides are calculated backwards:
-
-        strides[strides.size() - 1] = 1;
-        for (size_t i = strides.size() - 1; i-->0;) {
-            strides[i] = strides[i + 1] * type.get_dimension()[i + 1];
-        }
+        compute_strides();
     }
+
+    // ReSharper disable once CppNonExplicitConvertingConstructor
+    array_t(f32 value);
 
     // Quite inefficient, use sparingly
     std::variant<i32, i64, f32, f64> operator[](std::same_as<size_t> auto... indices) {
@@ -130,6 +132,8 @@ public:
     [[nodiscard]] vector_variant& get_value();
 
 private:
+    void compute_strides();
+
     type_t type;
     vector_variant value;
     std::vector<u32> strides;
@@ -142,15 +146,19 @@ public:
     explicit value(array_t array);
     explicit value(var_t var);
 
+    template<typename T>
+    [[nodiscard]] bool is() const {
+        return std::holds_alternative<T>(variant_);
+    }
+
     [[nodiscard]] const type_t& get_type() const;
-
-    array_t& get_array();
-
-    var_t& get_var();
+    [[nodiscard]] const array_t& get_array() const;
+    [[nodiscard]] const var_t& get_var() const;
 
 private:
    std::variant<array_t, var_t> variant_;
 };
+
 
 // An equation will look something like:
 // a:f32[8] = sin b
@@ -161,6 +169,8 @@ public:
 
     [[nodiscard]] const std::vector<value>& get_input() const;
     [[nodiscard]] const std::vector<var_t>& get_output() const;
+    [[nodiscard]] const value& get_input(size_t i) const;
+    [[nodiscard]] const var_t& get_output(size_t i) const;
     [[nodiscard]] primitive_op get_op() const;
 
 

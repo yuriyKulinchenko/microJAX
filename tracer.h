@@ -7,16 +7,7 @@
 #include "jax_types.h"
 
 class jaxpr_tracer;
-
-class jaxpr_builder {
-public:
-    u32 new_var_id();
-    jaxpr_tracer get_tracer(jax::type_t type);
-    [[nodiscard]] jax::expression&& get_jaxpr();
-
-    jax::expression jaxpr;
-    u32 var_count = 0;
-};
+class jaxpr_builder;
 
 class jaxpr_tracer {
 public:
@@ -44,6 +35,22 @@ public:
 private:
     jax::var_t var;
     jaxpr_builder& builder;
+};
+
+class jaxpr_builder {
+public:
+    u32 new_var_id();
+    jaxpr_tracer get_tracer(jax::type_t type);
+
+    template<std::convertible_to<u32>... Args>
+    jaxpr_tracer get_tracer(jax::type_enum base_type, Args... dimension) {
+        return get_tracer(jax::type_t{base_type, dimension...});
+    }
+
+    [[nodiscard]] jax::expression&& get_jaxpr();
+
+    jax::expression jaxpr;
+    u32 var_count = 0;
 };
 
 #endif //TRACER_H
