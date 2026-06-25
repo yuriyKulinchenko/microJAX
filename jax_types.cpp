@@ -141,4 +141,16 @@ input(std::move(input)),
 output(std::move(output)),
 op(op) {}
 
+void expression::add_input(var_t var) {
+    invars.push_back(std::move(var));
+}
+
+void expression::add_output(value val) {
+    outvals.push_back(std::move(val));
+}
+
+void expression::add_equation(equation eq) {
+    equations.push_back(std::move(eq));
+}
+
 }

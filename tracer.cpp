@@ -76,7 +76,7 @@ jaxpr_tracer jaxpr_tracer::exp() const {
 }
 
 u32 jaxpr_builder::new_var_id() {
-    return var_count++;
+    return (jaxpr.max_var_id = var_count++);
 }
 
 jaxpr_tracer jaxpr_builder::register_tracer(jax::type_t type) {

@@ -184,6 +184,11 @@ struct expression {
     std::vector<var_t> invars;
     std::vector<value> outvals;
     std::vector<equation> equations;
+    u32 max_var_id = 0; // Used to prevent variable id collisions
+
+    void add_input(var_t var);
+    void add_output(value val);
+    void add_equation(equation eq);
 };
 
 
