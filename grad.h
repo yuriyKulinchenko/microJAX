@@ -9,13 +9,12 @@ class grad_class {
     friend jax::expression grad(const jax::expression& expr);
     grad_class(const jax::expression& expr);
 
-    jax::expression find_grad();
+    jax::expression find_grad(jax::value seed);
     void introduce_adjoint(const jax::var_t& var);
     jax::value* get_adjoint(const jax::var_t& var);
-    void update_adjoint(const jax::var_t& input_var, const jax::var_t& product_var);
+    void update_adjoint(const jax::var_t& input_var, const jax::value& product_val);
 
     void propagate_adjoints(const jax::equation& eq);
-    void propagate_simple_elementwise_adjoints(const jax::equation& eq);
 
     bool adjoint_is_active(jax::var_t var, bool apply_update=true);
 

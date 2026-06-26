@@ -145,6 +145,7 @@ public:
         }
 
         compute_strides();
+        check_single_value();
     }
 
     template<typename T>
@@ -170,7 +171,19 @@ public:
 
     template<typename T>
     static array_t build_fill(type_t type, T value) {
-        return array_t{std::move(type), std::vector<T>(type.get_dimension().size(), value)};
+        switch (type.get_base_type()) {
+            using enum type_enum;
+            case I32:
+            return array_t{std::move(type), std::vector<i32>(num_elements(type.get_dimension()), value)};
+            case I64:
+            return array_t{std::move(type), std::vector<i64>(num_elements(type.get_dimension()), value)};
+            case F32:
+            return array_t{std::move(type), std::vector<f32>(num_elements(type.get_dimension()), value)};
+            case F64:
+            return array_t{std::move(type), std::vector<f64>(num_elements(type.get_dimension()), value)};
+            default:
+            return array_t{0};
+        }
     }
 
     // ReSharper disable once CppNonExplicitConvertingConstructor
@@ -203,12 +216,19 @@ public:
     [[nodiscard]] const vector_variant& get_value() const;
     [[nodiscard]] vector_variant& get_value();
 
+    bool has_value(f64 val) {
+        return has_single_value && val == single_value;
+    }
+
 private:
     void compute_strides();
+    void check_single_value();
 
     type_t type;
     vector_variant value;
     std::vector<size_t> stride;
+    f64 single_value = 0;
+    bool has_single_value = false;
 };
 
 

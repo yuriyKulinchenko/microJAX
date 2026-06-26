@@ -70,7 +70,9 @@ const type_t& var_t::get_type() const {
 }
 
 array_t::array_t(f32 value)
-: array_t(type_t{type_enum::F32}, std::vector<f32>{value}) {}
+: array_t(type_t{type_enum::F32}, std::vector<f32>{value}) {
+    check_single_value();
+}
 
 void array_t::compute_strides() {
     const std::vector<size_t>& dimension = type.get_dimension();
@@ -133,6 +135,25 @@ span_variant& array_span::get_value() {
     return value;
 }
 
+void array_t::check_single_value() {
+    std::visit([this](auto& vec) {
+        if (vec.size() == 0) {
+            this->has_single_value = true;
+            return;
+        }
+
+        auto val = vec[0];
+        for (size_t i = 1; i < vec.size(); i++) {
+            if (vec[i] != val) {
+                this->has_single_value = false;
+                return;
+            }
+        }
+
+        this->has_single_value = true;
+        this->single_value = static_cast<f64>(val);
+    }, value);
+}
 
 value::value(array_t array): variant_(std::move(array)) {}
 value::value(var_t var): variant_(std::move(var)) {}

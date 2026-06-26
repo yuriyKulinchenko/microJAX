@@ -30,8 +30,10 @@ amenable to this extension.
 */
 
 jax::expression grad(const jax::expression& expr) {
+    // For now, take the seed to be f32:
+    using namespace jax;
     auto instance = grad_class{expr};
-    return instance.find_grad();
+    return instance.find_grad(value{array_t::build_fill(type_t{type_enum::F32}, 1)});
 }
 
 grad_class::grad_class(const jax::expression& expr): input_expr(expr) {
@@ -72,17 +74,17 @@ bool grad_class::adjoint_is_active(jax::var_t var, bool apply_update) {
     return false;
 }
 
-void grad_class::update_adjoint(const jax::var_t& input_var, const jax::var_t& product_var) {
+void grad_class::update_adjoint(const jax::var_t& input_var, const jax::value& product_val) {
     // Case 1: input_adj does not yet exist:
     if (!adjoint_is_active(input_var)) {
-        variable_adjoint_map.insert_or_assign(input_var.get_id(), jax::value{product_var});
+        variable_adjoint_map.insert_or_assign(input_var.get_id(), jax::value{product_val});
     } else {
         // Case 2: it does exist - sum is required:
-        auto sum_var = jax::var_t{output_expr.new_var_id(), product_var.get_type()};
+        auto sum_var = jax::var_t{output_expr.new_var_id(), product_val.get_type()};
         const auto& input_adj = *get_adjoint(input_var);
 
         output_expr.equations.emplace_back(
-            std::vector{jax::value{product_var}, input_adj},
+            std::vector{jax::value{product_val}, input_adj},
             std::vector{sum_var},
             jax::primitive_op::ADD
         );
@@ -92,12 +94,6 @@ void grad_class::update_adjoint(const jax::var_t& input_var, const jax::var_t& p
 
     }
 }
-
-
-void grad_class::propagate_simple_elementwise_adjoints(const jax::equation& eq) {
-
-}
-
 
 void grad_class::propagate_adjoints(const jax::equation& eq) {
     // Requires knowledge of output adjoints, and shape of eq.op to dispatch over
@@ -132,7 +128,7 @@ void grad_class::propagate_adjoints(const jax::equation& eq) {
                     MUL
                 );
 
-                update_adjoint(input_var, product_var);
+                update_adjoint(input_var, jax::value{product_var});
             }
             break;
         }
@@ -172,7 +168,7 @@ void grad_class::propagate_adjoints(const jax::equation& eq) {
                     MUL
                 );
 
-                update_adjoint(input_var, product_var);
+                update_adjoint(input_var, jax::value{product_var});
             }
             break;
         }
@@ -191,13 +187,19 @@ void grad_class::propagate_adjoints(const jax::equation& eq) {
     }
 }
 
-jax::expression grad_class::find_grad() {
+jax::expression grad_class::find_grad(jax::value seed) {
     if (input_expr.outvals.size() != 1) {
         throw formatted_error("Error: expected 1 output, received {}", input_expr.outvals.size());
     }
 
-    if (input_expr.outvals[0].get_type().get_dimension().size() != 0) {
-        throw formatted_error("Error: shape of output must be scalar");
+    if (input_expr.outvals[0].is<jax::array_t>()) {
+        throw formatted_error("Error: expected output to be variable, received array");
+    }
+
+    const jax::var_t& output_var = input_expr.outvals[0].get_var();
+
+    if (output_var.get_type().get_dimension().size() != 0) {
+        throw formatted_error("Error: shape of output variable must be scalar");
     }
 
     // Add inputs:
@@ -218,17 +220,44 @@ jax::expression grad_class::find_grad() {
 
     // Seed the adjoint of the initial equation:
 
+    update_adjoint(output_var, seed);
 
     // perform a backward pass:
-    // TODO: special handling is required to seed the initial equation
 
     for (auto& eq: input_expr.equations | std::views::reverse) {
         propagate_adjoints(eq);
     }
 
+    // Populate outputs:
+
+    for (auto& var: input_expr.invars) {
+        jax::value* val = get_adjoint(var);
+        if (val) {
+            // The adjoint exists:
+            output_expr.outvals.push_back(*val);
+        } else {
+            // The adjoint does not exist - replace it with 0:
+            output_expr.outvals.push_back(jax::value{jax::array_t::build_fill(var.get_type(), 0)});
+        }
+    }
+
     return output_expr;
 }
 
+/*
+
+Interesting question - how is the following expression handled:
+
+{
+    lambda %0:f32[] let
+    in (%0)
+}
+
+Its handled! it should just return 1, the default adjoint
+
+
+
+*/
 
 
 
