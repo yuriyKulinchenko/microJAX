@@ -159,56 +159,97 @@ void grad_class::propagate_adjoints(const jax::equation& eq) {
     switch (eq.get_op()) {
         using enum jax::primitive_op;
         case SIN: {
-            auto& input_var = eq.get_input(0).get_var();
             auto& output_var = eq.get_output(0);
+            auto* output_adj = get_adjoint(output_var);
+            if (!output_adj) break;
 
-            if (const auto* output_adj = get_adjoint(output_var)) {
+            auto& input_var = eq.get_input(0).get_var();
 
-                auto f_prime_var = jax::var_t{output_expr.new_var_id(), output_var.get_type()};
+            auto f_prime_var = jax::var_t{output_expr.new_var_id(), output_var.get_type()};
 
-                output_expr.equations.emplace_back(
-                    std::vector{jax::value{input_var}},
-                    std::vector{f_prime_var},
-                    COS
-                );
+            output_expr.equations.emplace_back(
+                std::vector{jax::value{input_var}},
+                std::vector{f_prime_var},
+                COS
+            );
 
-                update_adjoint(input_var, jax::value{f_prime_var}, *output_adj);
-            }
+            update_adjoint(input_var, jax::value{f_prime_var}, *output_adj);
+
             break;
         }
 
         case COS: {
-            auto& input_var = eq.get_input(0).get_var();
             auto& output_var = eq.get_output(0);
+            auto* output_adj = get_adjoint(output_var);
+            if (!output_adj) break;
 
-            if (const auto* output_adj = get_adjoint(output_var)) {
+            auto& input_var = eq.get_input(0).get_var();
 
-                auto var1 = jax::var_t{output_expr.new_var_id(), output_var.get_type()};
+            auto var1 = jax::var_t{output_expr.new_var_id(), output_var.get_type()};
 
-                output_expr.equations.emplace_back(
-                    std::vector{jax::value{input_var}},
-                    std::vector{var1},
-                    SIN
-                );
+            output_expr.equations.emplace_back(
+                std::vector{jax::value{input_var}},
+                std::vector{var1},
+                SIN
+            );
 
-                auto f_prime_var = jax::var_t{output_expr.new_var_id(), output_var.get_type()};
+            auto f_prime_var = jax::var_t{output_expr.new_var_id(), output_var.get_type()};
 
-                output_expr.equations.emplace_back(
-                    std::vector{jax::value{var1}},
-                    std::vector{f_prime_var},
-                    NEG
-                );
+            output_expr.equations.emplace_back(
+                std::vector{jax::value{var1}},
+                std::vector{f_prime_var},
+                NEG
+            );
 
-                update_adjoint(input_var, jax::value{f_prime_var}, *output_adj);
-            }
+            update_adjoint(input_var, jax::value{f_prime_var}, *output_adj);
+
             break;
         }
 
         case ADD: {
+            // z = x + y
+            // x' += dL/dz dz/dx
+            // dz/dx = 1 => x' += z'
+            // Similarly, y' += z'
+
+            auto& output_var = eq.get_output(0);
+            auto* output_adj = get_adjoint(output_var);
+            if (!output_adj) break;
+
+            auto& x_val = eq.get_input(0);
+            auto& y_val = eq.get_input(1);
+
+            if (x_val.is<jax::var_t>()) {
+                update_adjoint(x_val.get_var(), *output_adj);
+            }
+
+            if (y_val.is<jax::var_t>()) {
+                update_adjoint(y_val.get_var(), *output_adj);
+            }
             break;
         }
 
         case MUL: {
+            // z = x * y
+            // x' += dL/dz dz/dx
+            // dz/dx = y => x' += y * z'
+            // Similarly, y' += x * z'
+
+            auto& output_var = eq.get_output(0);
+            auto* output_adj = get_adjoint(output_var);
+            if (!output_adj) break;
+
+            auto& x_val = eq.get_input(0);
+            auto& y_val = eq.get_input(1);
+
+            if (x_val.is<jax::var_t>()) {
+                update_adjoint(x_val.get_var(), y_val, *output_adj);
+            }
+
+            if (y_val.is<jax::var_t>()) {
+                update_adjoint(y_val.get_var(), x_val, *output_adj);
+            }
+
             break;
         }
 

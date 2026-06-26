@@ -19,7 +19,7 @@ int main() {
     jaxpr_tracer tracer_x = builder.register_tracer(type_enum::F32);
     // jaxpr_tracer tracer_y = builder.register_tracer(type_enum::F32);
 
-    auto output = jax::sin(tracer_x);
+    auto output = jax::cos(jax::sin(tracer_x));
     builder.register_output(output);
 
     std::cout << "Original expression:\n";
