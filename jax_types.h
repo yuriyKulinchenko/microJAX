@@ -208,16 +208,20 @@ public:
         return std::get<std::vector<T>>(value)[flatten_index(stride, indices)];
     }
 
-    array_t operator+(const array_t& other);
-    array_t operator-(const array_t& other);
-    array_t operator*(const array_t& other);
+    array_t operator+(const array_t& other) const;
+    array_t operator-(const array_t& other) const;
+    array_t operator*(const array_t& other) const;
 
     [[nodiscard]] const type_t& get_type() const;
     [[nodiscard]] const vector_variant& get_value() const;
     [[nodiscard]] vector_variant& get_value();
 
-    bool has_value(f64 val) {
-        return has_single_value && val == single_value;
+    bool has_single_value(const f64 val) const {
+        return has_single_value_ && val == single_value;
+    }
+
+    bool has_single_value() const {
+        return has_single_value_;
     }
 
 private:
@@ -228,7 +232,7 @@ private:
     vector_variant value;
     std::vector<size_t> stride;
     f64 single_value = 0;
-    bool has_single_value = false;
+    bool has_single_value_ = false;
 };
 
 

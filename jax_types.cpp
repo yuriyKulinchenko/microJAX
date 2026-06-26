@@ -95,7 +95,7 @@ if(type != other.get_type()) {                                                  
 }
 
 #define BINARY_OP_OTHER(op, op_assign)                                      \
-array_t array_t::operator op (const array_t& other) {                       \
+array_t array_t::operator op (const array_t& other) const {                 \
     DIMENSIONALITY_ERROR();                                                 \
     return std::visit([&](auto& vec) -> array_t {                           \
         auto return_vec = vec;                                              \
@@ -138,19 +138,19 @@ span_variant& array_span::get_value() {
 void array_t::check_single_value() {
     std::visit([this](auto& vec) {
         if (vec.size() == 0) {
-            this->has_single_value = true;
+            this->has_single_value_ = true;
             return;
         }
 
         auto val = vec[0];
         for (size_t i = 1; i < vec.size(); i++) {
             if (vec[i] != val) {
-                this->has_single_value = false;
+                this->has_single_value_ = false;
                 return;
             }
         }
 
-        this->has_single_value = true;
+        this->has_single_value_ = true;
         this->single_value = static_cast<f64>(val);
     }, value);
 }

@@ -74,41 +74,95 @@ bool grad_class::adjoint_is_active(jax::var_t var, bool apply_update) {
     return false;
 }
 
-void grad_class::update_adjoint(const jax::var_t& input_var, const jax::value& product_val) {
+void grad_class::update_adjoint(const jax::var_t& input_adj_var, const jax::value& product_val) {
+    // First, check if product is zero:
+    if (product_val.is<jax::array_t>()) {
+        if (product_val.get_array().has_single_value(0)) {
+            return;
+        }
+    }
+
     // Case 1: input_adj does not yet exist:
-    if (!adjoint_is_active(input_var)) {
-        variable_adjoint_map.insert_or_assign(input_var.get_id(), jax::value{product_val});
+    if (!adjoint_is_active(input_adj_var)) {
+        variable_adjoint_map.insert_or_assign(input_adj_var.get_id(), jax::value{product_val});
     } else {
         // Case 2: it does exist - sum is required:
         auto sum_var = jax::var_t{output_expr.new_var_id(), product_val.get_type()};
-        const auto& input_adj = *get_adjoint(input_var);
+        const auto& input_adj = *get_adjoint(input_adj_var);
 
         output_expr.equations.emplace_back(
-            std::vector{jax::value{product_val}, input_adj},
+            std::vector{product_val, input_adj},
             std::vector{sum_var},
             jax::primitive_op::ADD
         );
 
         // Carry through the updated adjoint:
-        variable_adjoint_map.insert_or_assign(input_var.get_id(), jax::value{sum_var});
+        variable_adjoint_map.insert_or_assign(input_adj_var.get_id(), jax::value{sum_var});
 
     }
+}
+
+void grad_class::update_adjoint(
+    const jax::var_t& input_adj_var,
+    const jax::value& f_prime_val,
+    const jax::value& adjoint_val) {
+
+    bool f_prime_is_array = f_prime_val.is<jax::array_t>();
+    bool adjoint_is_array = adjoint_val.is<jax::array_t>();
+
+    if (f_prime_is_array && adjoint_is_array) {
+        // Fold constant:
+        jax::array_t product = f_prime_val.get_array() * adjoint_val.get_array();
+        if (product.has_single_value(0)) return;
+        update_adjoint(input_adj_var, jax::value{std::move(product)});
+    }
+
+    if (f_prime_is_array) {
+        // If product is 0, return early,
+        // If f_prime is 1, only propagate the adjoint:
+        const jax::array_t& f_prime = f_prime_val.get_array();
+        if (f_prime.has_single_value(0)) return;
+        if (f_prime.has_single_value(1)) {
+            update_adjoint(input_adj_var, adjoint_val);
+        }
+    } else if (adjoint_is_array) {
+        const jax::array_t& adjoint = adjoint_val.get_array();
+        if (adjoint.has_single_value(0)) return;
+        if (adjoint.has_single_value(1)) {
+            update_adjoint(input_adj_var, f_prime_val);
+        }
+    } else {
+        auto product_var = jax::var_t{output_expr.new_var_id(), input_adj_var.get_type()};
+
+        output_expr.equations.emplace_back(
+            std::vector{f_prime_val, adjoint_val},
+            std::vector{product_var},
+            jax::primitive_op::MUL
+        );
+
+        update_adjoint(input_adj_var, jax::value{product_var});
+    }
+}
+
+bool all_inputs_constant(const std::vector<jax::value>& inputs) {
+    for (auto& input: inputs) if (input.is<jax::var_t>()) return false;
+    return true;
 }
 
 void grad_class::propagate_adjoints(const jax::equation& eq) {
     // Requires knowledge of output adjoints, and shape of eq.op to dispatch over
     // If an adjoint does not exist, take it to be zero
 
+    // Check if there is anything to propagate to:
+    if (all_inputs_constant(eq.get_input())) return;
+
     switch (eq.get_op()) {
         using enum jax::primitive_op;
         case SIN: {
-            // Check if there is anything to propagate to:
-            if (eq.get_input(0).is<jax::array_t>()) return;
             auto& input_var = eq.get_input(0).get_var();
             auto& output_var = eq.get_output(0);
 
             if (const auto* output_adj = get_adjoint(output_var)) {
-                // First, create an equation that computes f'(input):
 
                 auto f_prime_var = jax::var_t{output_expr.new_var_id(), output_var.get_type()};
 
@@ -118,29 +172,16 @@ void grad_class::propagate_adjoints(const jax::equation& eq) {
                     COS
                 );
 
-                // Then, compute f'(input) * output_adj:
-
-                auto product_var = jax::var_t{output_expr.new_var_id(), output_var.get_type()};
-
-                output_expr.equations.emplace_back(
-                    std::vector{jax::value{f_prime_var}, *output_adj},
-                    std::vector{product_var},
-                    MUL
-                );
-
-                update_adjoint(input_var, jax::value{product_var});
+                update_adjoint(input_var, jax::value{f_prime_var}, *output_adj);
             }
             break;
         }
 
         case COS: {
-            // Check if there is anything to propagate to:
-            if (eq.get_input(0).is<jax::array_t>()) return;
             auto& input_var = eq.get_input(0).get_var();
             auto& output_var = eq.get_output(0);
 
             if (const auto* output_adj = get_adjoint(output_var)) {
-                // First, create an equation that computes f'(input):
 
                 auto var1 = jax::var_t{output_expr.new_var_id(), output_var.get_type()};
 
@@ -158,17 +199,7 @@ void grad_class::propagate_adjoints(const jax::equation& eq) {
                     NEG
                 );
 
-                // Then, compute f'(input) * output_adj:
-
-                auto product_var = jax::var_t{output_expr.new_var_id(), output_var.get_type()};
-
-                output_expr.equations.emplace_back(
-                    std::vector{jax::value{f_prime_var}, *output_adj},
-                    std::vector{product_var},
-                    MUL
-                );
-
-                update_adjoint(input_var, jax::value{product_var});
+                update_adjoint(input_var, jax::value{f_prime_var}, *output_adj);
             }
             break;
         }
@@ -243,21 +274,5 @@ jax::expression grad_class::find_grad(jax::value seed) {
 
     return output_expr;
 }
-
-/*
-
-Interesting question - how is the following expression handled:
-
-{
-    lambda %0:f32[] let
-    in (%0)
-}
-
-Its handled! it should just return 1, the default adjoint
-
-
-
-*/
-
 
 

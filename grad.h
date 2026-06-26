@@ -12,7 +12,15 @@ class grad_class {
     jax::expression find_grad(jax::value seed);
     void introduce_adjoint(const jax::var_t& var);
     jax::value* get_adjoint(const jax::var_t& var);
-    void update_adjoint(const jax::var_t& input_var, const jax::value& product_val);
+
+    // input_adj_var += val
+    void update_adjoint(const jax::var_t& input_adj_var, const jax::value& val);
+
+    // input_adj_var += f_prime_val * adjoint_val
+    void update_adjoint(
+        const jax::var_t& input_adj_var,
+        const jax::value& f_prime_val,
+        const jax::value& adjoint_val);
 
     void propagate_adjoints(const jax::equation& eq);
 
