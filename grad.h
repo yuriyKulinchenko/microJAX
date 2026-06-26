@@ -17,7 +17,7 @@ class grad_class {
     void propagate_adjoints(const jax::equation& eq);
     void propagate_simple_elementwise_adjoints(const jax::equation& eq);
 
-    bool adjoint_is_active(jax::var_t var, constexpr bool apply_update=true);
+    bool adjoint_is_active(jax::var_t var, bool apply_update=true);
 
     const jax::expression& input_expr;
     jax::expression output_expr;

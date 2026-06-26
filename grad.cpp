@@ -65,7 +65,7 @@ jax::value *grad_class::get_adjoint(const jax::var_t& var) {
     return nullptr;
 }
 
-bool grad_class::adjoint_is_active(jax::var_t var, constexpr bool apply_update) {
+bool grad_class::adjoint_is_active(jax::var_t var, bool apply_update) {
     auto it = active_adjoint_map.find(var.get_id());
     if (it->second) return true;
     if (apply_update) it->second = true;
@@ -75,7 +75,7 @@ bool grad_class::adjoint_is_active(jax::var_t var, constexpr bool apply_update) 
 void grad_class::update_adjoint(const jax::var_t& input_var, const jax::var_t& product_var) {
     // Case 1: input_adj does not yet exist:
     if (!adjoint_is_active(input_var)) {
-        variable_adjoint_map[input_var.get_id()] = jax::value{product_var};
+        variable_adjoint_map.insert_or_assign(input_var.get_id(), jax::value{product_var});
     } else {
         // Case 2: it does exist - sum is required:
         auto sum_var = jax::var_t{output_expr.new_var_id(), product_var.get_type()};
@@ -88,7 +88,7 @@ void grad_class::update_adjoint(const jax::var_t& input_var, const jax::var_t& p
         );
 
         // Carry through the updated adjoint:
-        variable_adjoint_map[input_var.get_id()] = jax::value{sum_var};
+        variable_adjoint_map.insert_or_assign(input_var.get_id(), jax::value{sum_var});
 
     }
 }

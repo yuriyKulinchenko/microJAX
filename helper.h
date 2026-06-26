@@ -79,4 +79,7 @@ inline void print_red(const std::string& s) {
     std::cout << RED << s << RESET;
 }
 
+template <typename F, typename R, typename... Args>
+concept invocable_r = std::is_invocable_r_v<R, F, Args...>;
+
 #endif //HELPER_H

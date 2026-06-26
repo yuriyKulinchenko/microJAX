@@ -6,6 +6,8 @@
 #include <vector>
 #include <span>
 
+#include "helper.h"
+
 using u32 = uint32_t;
 using u64 = uint64_t;
 using i32 = int32_t;
@@ -145,6 +147,28 @@ public:
         compute_strides();
     }
 
+    template<typename T>
+    static array_t build (type_t type, invocable_r<T, const std::vector<size_t>&> auto f) {
+        // f takes the std::vector
+        const auto& dimension_vector = type.get_dimension();
+        auto index_vector = std::vector<size_t>(type.get_dimension().size(), 0);
+        auto output_vector = std::vector<T>(num_elements(type.get_dimension()));
+
+        for(auto& output: output_vector) {
+            output = f(index_vector);
+            for (size_t j = index_vector.size(); j--> 0;) {
+                if (index_vector[j] < dimension_vector[j] - 1) {
+                    index_vector[j]++;
+                    break;
+                }
+                index_vector[j] = 0;
+            }
+        }
+
+        return array_t{std::move(type), output_vector};
+    }
+
+
     // ReSharper disable once CppNonExplicitConvertingConstructor
     array_t(f32 value);
 
@@ -248,16 +272,6 @@ private:
 // Challenge is dyanmic iteration through indices, without relying on expensive recursion etc
 // Ideally, implement a linear scan over dimension
 // Manually maintain an index stack!
-
-template<typename F>
-jax::array_t build(type_t type, F f) {
-    // f takes the std::vector
-    auto index_vector = std::vector<size_t>(type.get_dimension().size());
-    size_t i = index_vector.size() - 1;
-    while (true) {
-
-    }
-}
 
 #undef check_type
 #undef ACCESS_DISPATCH
