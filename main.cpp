@@ -26,7 +26,7 @@ int main() {
     std::cout << builder.jaxpr;
 
     std::cout << "Grad expression:\n";
-    std::cout << grad(builder.jaxpr);
+    std::cout << grad(grad(grad(builder.jaxpr)));
 
     return 0;
 }

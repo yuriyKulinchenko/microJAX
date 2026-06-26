@@ -40,6 +40,11 @@ grad_class::grad_class(const jax::expression& expr): input_expr(expr) {
     output_expr.var_id = expr.var_id;
 }
 
+jax::var_t grad_class::fresh_var(jax::type_t type) {
+    return jax::var_t{output_expr.new_var_id(), std::move(type)};
+}
+
+
 void grad_class::introduce_adjoint(const jax::var_t& var) {
     /*
     For each intermediate value in the calculation, an adjoint
@@ -115,24 +120,50 @@ void grad_class::update_adjoint(
         jax::array_t product = f_prime_val.get_array() * adjoint_val.get_array();
         if (product.has_single_value(0)) return;
         update_adjoint(input_adj_var, jax::value{std::move(product)});
-    }
-
-    if (f_prime_is_array) {
-        // If product is 0, return early,
-        // If f_prime is 1, only propagate the adjoint:
+    } else if (f_prime_is_array) {
         const jax::array_t& f_prime = f_prime_val.get_array();
-        if (f_prime.has_single_value(0)) return;
-        if (f_prime.has_single_value(1)) {
-            update_adjoint(input_adj_var, adjoint_val);
+        if (f_prime.has_single_value(0)) {
+            // If f_prime is 0, return early
+            return;
         }
+        if (f_prime.has_single_value(1)) {
+            // If f_prime is 1, only propagate the adjoint
+            update_adjoint(input_adj_var, adjoint_val);
+        } else if (f_prime.has_single_value(-1)) {
+            // If f_prime is -1, apply negation
+            auto negated_var = fresh_var(input_adj_var.get_type());
+            output_expr.equations.emplace_back(
+                std::vector{adjoint_val},
+                std::vector{negated_var},
+                jax::primitive_op::NEG
+            );
+            update_adjoint(input_adj_var, jax::value{negated_var});
+        } else {
+            // Otherwise, actually multiply
+            update_adjoint(input_adj_var, f_prime_val, adjoint_val);
+        }
+
     } else if (adjoint_is_array) {
         const jax::array_t& adjoint = adjoint_val.get_array();
-        if (adjoint.has_single_value(0)) return;
+        if (adjoint.has_single_value(0)) {
+            return;
+        }
         if (adjoint.has_single_value(1)) {
             update_adjoint(input_adj_var, f_prime_val);
+        } else if (adjoint.has_single_value(-1)) {
+            auto negated_var = fresh_var(input_adj_var.get_type());
+            output_expr.equations.emplace_back(
+                std::vector{f_prime_val},
+                std::vector{negated_var},
+                jax::primitive_op::NEG
+            );
+            update_adjoint(input_adj_var, jax::value{negated_var});
+        } else {
+            update_adjoint(input_adj_var, f_prime_val, adjoint_val);
         }
+
     } else {
-        auto product_var = jax::var_t{output_expr.new_var_id(), input_adj_var.get_type()};
+        auto product_var = fresh_var(input_adj_var.get_type());
 
         output_expr.equations.emplace_back(
             std::vector{f_prime_val, adjoint_val},
@@ -202,6 +233,19 @@ void grad_class::propagate_adjoints(const jax::equation& eq) {
             );
 
             update_adjoint(input_var, jax::value{f_prime_var}, *output_adj);
+
+            break;
+        }
+
+        case NEG: {
+            auto& output_var = eq.get_output(0);
+            auto* output_adj = get_adjoint(output_var);
+            if (!output_adj) break;
+
+            auto& input_var = eq.get_input(0).get_var();
+            auto f_prime = jax::array_t::build_fill(output_var.get_type(), -1); // -1
+
+            update_adjoint(input_var, jax::value{f_prime}, *output_adj);
 
             break;
         }
