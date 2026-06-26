@@ -25,9 +25,36 @@ inline std::ostream& operator<<(std::ostream& stream, const jax::var_t& var) {
 }
 
 inline std::ostream& operator<<(std::ostream& stream, const jax::array_t& array) {
-    return std::visit([&](auto& member) -> std::ostream& {
-        if (member.size() == 1) return stream << member[0];
-        return stream << member;
+
+    const auto& dimension = array.get_type().get_dimension();
+    return std::visit([&](auto& flat_vector) -> std::ostream& {
+        auto index_vector = std::vector<size_t>(dimension.size(), 0);
+        size_t remaining_open_brackets = dimension.size();
+
+        for (auto& element: flat_vector) {
+
+            // Emit sequence of [[[...
+            while (remaining_open_brackets > 0) {
+                stream << '[';
+                remaining_open_brackets--;
+            }
+
+            stream << element;
+
+            // Emit sequence of ]]]...
+            for (size_t j = index_vector.size(); j--> 0;) {
+                if (index_vector[j] < dimension[j] - 1) {
+                    index_vector[j]++;
+                    stream << ", ";
+                    break;
+                }
+
+                index_vector[j] = 0;
+                stream << ']';
+                remaining_open_brackets++;
+            }
+        }
+        return stream;
     }, array.get_value());
 }
 

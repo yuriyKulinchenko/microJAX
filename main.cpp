@@ -14,12 +14,6 @@ T test_function(T x, T y) {
 
 int main() {
     using namespace jax;
-    auto identity_matrix = array_t::build<f32>(type_t{type_enum::F32, 2, 2}, [](const auto& index_vec) {
-        return index_vec[0] == index_vec[1];
-    });
-
-    std::cout << identity_matrix << '\n';
-    return 0;
     // Construct tracer:
     jaxpr_builder builder {};
     jaxpr_tracer tracer_x = builder.register_tracer(type_enum::F32);
