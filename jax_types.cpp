@@ -23,7 +23,7 @@ std::string_view to_string(type_enum t) {
 type_t::type_t(type_enum base_type):
 base_type(base_type) {}
 
-type_t::type_t(type_enum base_type, std::vector<u32> dimension):
+type_t::type_t(type_enum base_type, std::vector<size_t> dimension):
 base_type(base_type),
 dimension(std::move(dimension)) {}
 
@@ -51,17 +51,17 @@ type_enum type_t::get_base_type() const {
     return base_type;
 }
 
-const std::vector<u32>& type_t::get_dimension() const {
+const std::vector<size_t>& type_t::get_dimension() const {
     return dimension;
 }
 
-var_t::var_t(u32 id, type_t type): id(id), type(std::move(type)) {}
+var_t::var_t(size_t id, type_t type): id(id), type(std::move(type)) {}
 
-u32 var_t::get_id() const {
+size_t var_t::get_id() const {
     return id;
 }
 
-void var_t::set_id(u32 new_id) {
+void var_t::set_id(size_t new_id) {
     id = new_id;
 }
 
@@ -73,17 +73,17 @@ array_t::array_t(f32 value)
 : array_t(type_t{type_enum::F32}, std::vector<f32>{value}) {}
 
 void array_t::compute_strides() {
-    const std::vector<u32>& dimension = type.get_dimension();
-    strides.resize(dimension.size());
-    if (strides.empty()) {
+    const std::vector<size_t>& dimension = type.get_dimension();
+    stride.resize(dimension.size());
+    if (stride.empty()) {
         return;
     }
 
     // Strides are calculated backwards:
 
-    strides[strides.size() - 1] = 1;
-    for (size_t i = strides.size() - 1; i-->0;) {
-        strides[i] = strides[i + 1] * dimension[i + 1];
+    stride[stride.size() - 1] = 1;
+    for (size_t i = stride.size() - 1; i-->0;) {
+        stride[i] = stride[i + 1] * dimension[i + 1];
     }
 }
 
@@ -97,6 +97,18 @@ const vector_variant &array_t::get_value() const {
 }
 
 vector_variant &array_t::get_value() {
+    return value;
+}
+
+const type_span& array_span::get_type() const {
+    return type;
+}
+
+const span_variant& array_span::get_value() const {
+    return value;
+}
+
+span_variant& array_span::get_value() {
     return value;
 }
 
@@ -153,7 +165,7 @@ void expression::add_equation(equation eq) {
     equations.push_back(std::move(eq));
 }
 
-u32 expression::new_var_id() {
+size_t expression::new_var_id() {
     return var_id++;
 }
 

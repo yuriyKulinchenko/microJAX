@@ -22,8 +22,8 @@ class grad_class {
     const jax::expression& input_expr;
     jax::expression output_expr;
 
-    std::unordered_map<u32, bool> active_adjoint_map;
-    std::unordered_map<u32, jax::value> variable_adjoint_map;
+    std::unordered_map<size_t, bool> active_adjoint_map;
+    std::unordered_map<size_t, jax::value> variable_adjoint_map;
 };
 
 jax::expression grad(const jax::expression& expr);

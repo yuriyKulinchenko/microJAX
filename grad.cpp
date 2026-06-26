@@ -216,6 +216,9 @@ jax::expression grad_class::find_grad() {
         }
     }
 
+    // Seed the adjoint of the initial equation:
+
+
     // perform a backward pass:
     // TODO: special handling is required to seed the initial equation
 

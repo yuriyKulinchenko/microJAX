@@ -10,7 +10,7 @@
 inline std::ostream& operator<<(std::ostream& stream, const jax::type_t& type) {
     stream << to_lower(jax::to_string(type.get_base_type()));
     stream << '[';
-    const std::vector<u32>& dimension = type.get_dimension();
+    const std::vector<size_t>& dimension = type.get_dimension();
     for (int i = 0; i < dimension.size(); i++) {
         stream << dimension[i];
         if (i != dimension.size() - 1) stream << ", ";

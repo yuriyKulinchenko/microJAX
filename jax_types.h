@@ -4,6 +4,7 @@
 #include <string_view>
 #include <variant>
 #include <vector>
+#include <span>
 
 using u32 = uint32_t;
 using u64 = uint64_t;
@@ -40,11 +41,11 @@ public:
 
     explicit type_t(type_enum base_type);
 
-    type_t(type_enum base_type, std::vector<u32> dimension);
+    type_t(type_enum base_type, std::vector<size_t> dimension);
 
-    template<std::convertible_to<u32>... Dims>
+    template<std::convertible_to<size_t>... Dims>
     explicit type_t(type_enum base_type, Dims... dimension)
-    : base_type(base_type), dimension{static_cast<u32>(dimension)...} {}
+    : base_type(base_type), dimension{static_cast<size_t>(dimension)...} {}
 
 
     bool operator==(const type_t& other) const;
@@ -55,26 +56,26 @@ public:
     bool is_f64();
 
     [[nodiscard]] type_enum get_base_type() const;
-    [[nodiscard]] const std::vector<u32>& get_dimension() const;
+    [[nodiscard]] const std::vector<size_t>& get_dimension() const;
 
 private:
     type_enum base_type;
-    std::vector<u32> dimension;
+    std::vector<size_t> dimension;
 };
 
 class var_t {
 public:
-    explicit var_t(u32 id, type_t type);
+    explicit var_t(size_t id, type_t type);
 
-    [[nodiscard]] u32 get_id() const;
+    [[nodiscard]] size_t get_id() const;
 
-    void set_id(u32 new_id);
+    void set_id(size_t new_id);
 
     [[nodiscard]] const type_t& get_type() const;
 
 private:
     type_t type;
-    u32 id;
+    size_t id;
 };
 
 #define check_type(T_real, T_enum)                          \
@@ -89,8 +90,45 @@ using vector_variant = std::variant<
     std::vector<f32>,std::vector<f64>
 >;
 
+using span_variant = std::variant<
+    std::span<const i32>, std::span<const i64>,
+    std::span<const f32>,std::span<const f64>
+>;
+
+inline size_t num_elements(std::span<const size_t> dimension) {
+    size_t total = 1;
+    for (size_t dim : dimension) total *= dim;
+    return total;
+}
+
+size_t flatten_index(std::span<const size_t> stride, std::same_as<size_t> auto... indices) {
+    size_t idx = 0;
+    size_t axis = 0;
+    ((idx += indices * stride[axis++]), ...);
+    return idx;
+}
+
+inline size_t flatten_index(std::span<const size_t> stride, const std::vector<size_t>& indices) {
+    size_t idx = 0;
+    for (size_t axis = 0; axis < indices.size(); axis++) {
+        idx += indices[axis] * stride[axis];
+    }
+    return idx;
+}
+
+#define ACCESS_DISPATCH(...)                    \
+switch (type.get_base_type()) {                 \
+    using enum type_enum;                       \
+    case I32: return access<i32>(__VA_ARGS__);  \
+    case I64: return access<i64>(__VA_ARGS__);  \
+    case F32: return access<f32>(__VA_ARGS__);  \
+    case F64: return access<f64>(__VA_ARGS__);  \
+    default: return 0;                          \
+}
+
 class array_t {
 public:
+    friend class array_span;
     template<typename T>
     array_t(type_t type, std::vector<T> value):
     type(std::move(type)),
@@ -100,6 +138,10 @@ public:
         check_type(f32, F32);
         check_type(f64, F64);
 
+        if (std::get<std::vector<T>>(this->value).size() != num_elements(this->type.get_dimension())) {
+            throw std::logic_error("Error: array value does not match the size of its dimensions");
+        }
+
         compute_strides();
     }
 
@@ -108,23 +150,21 @@ public:
 
     // Quite inefficient, use sparingly
     std::variant<i32, i64, f32, f64> operator[](std::same_as<size_t> auto... indices) {
-        switch (type.get_base_type()) {
-            using enum type_enum;
-            case I32: return access<i32>(indices...);
-            case I64: return access<i64>(indices...);
-            case F32: return access<f32>(indices...);
-            case F64: return access<f64>(indices...);
-            default: return 0;
-        }
+        ACCESS_DISPATCH(indices...)
+    }
+
+    std::variant<i32, i64, f32, f64> operator[](const std::vector<size_t>& indices) {
+        ACCESS_DISPATCH(indices)
     }
 
     template<typename T>
     T& access(std::same_as<size_t> auto... indices) {
-        auto& raw = std::get<std::vector<T>>(value);
-        size_t idx = 0;
-        size_t axis = 0;
-        ((idx += indices * strides[axis++]), ...);
-        return raw[idx];
+        return std::get<std::vector<T>>(value)[flatten_index(stride, indices...)];
+    }
+
+    template<typename T>
+    T& access(const std::vector<size_t>& indices) {
+        return std::get<std::vector<T>>(value)[flatten_index(stride, indices)];
     }
 
     [[nodiscard]] const type_t& get_type() const;
@@ -136,10 +176,91 @@ private:
 
     type_t type;
     vector_variant value;
-    std::vector<u32> strides;
+    std::vector<size_t> stride;
 };
 
+
+struct type_span {
+    type_enum base_type;
+    std::span<const size_t> dimension;
+
+    [[nodiscard]] type_enum get_base_type() const { return base_type; }
+    [[nodiscard]] std::span<const size_t> get_dimension() const { return dimension; }
+};
+
+// Non-owning view, potentially to a subset of the array
+class array_span {
+public:
+
+    array_span(const array_t& array, const std::vector<size_t>& indices) {
+        type.base_type = array.type.get_base_type();
+
+        size_t i_0 = 0;
+        for (size_t i = 0; i < indices.size(); i++) {
+            i_0 += array.stride[i] * indices[i];
+        }
+
+        const auto& array_dimension = array.type.get_dimension();
+        type.dimension = std::span{array_dimension.begin() + indices.size(), array_dimension.end()};
+
+        const auto& array_stride = array.stride;
+        stride = std::span {array_stride.begin() + indices.size(), array_stride.end()};
+
+        // dimension_size(i) = stride[i] * dimension[i]
+        size_t total_size = array.stride[indices.size()] * array.type.get_dimension()[indices.size()];
+        value = std::visit([=](const auto& vec) -> span_variant {
+            return std::span{vec.begin() + i_0, total_size};
+        }, array.value);
+    }
+
+    std::variant<i32, i64, f32, f64> operator[](std::same_as<size_t> auto... indices) const {
+        ACCESS_DISPATCH(indices...)
+    }
+
+    std::variant<i32, i64, f32, f64> operator[](const std::vector<size_t>& indices) const {
+        ACCESS_DISPATCH(indices)
+    }
+
+    template<typename T>
+    const T& access(std::same_as<size_t> auto... indices) const {
+        return std::get<std::span<const T>>(value)[flatten_index(stride, indices...)];
+    }
+
+    template<typename T>
+    const T& access(const std::vector<size_t>& indices) const {
+        return std::get<std::span<const T>>(value)[flatten_index(stride, indices)];
+    }
+
+    [[nodiscard]] const type_span& get_type() const;
+    [[nodiscard]] const span_variant& get_value() const;
+    [[nodiscard]] span_variant& get_value();
+
+private:
+    type_span type;
+    std::span<const size_t> stride;
+    span_variant value;
+};
+
+// How would I provide an arbitrary builder expression?
+// User will have to provide a lambda, or a callable in general, which takes a vector
+// jax::array::build(type, f)
+// f : const std::vector<size_t>& -> T
+// Challenge is dyanmic iteration through indices, without relying on expensive recursion etc
+// Ideally, implement a linear scan over dimension
+// Manually maintain an index stack!
+
+template<typename F>
+jax::array_t build(type_t type, F f) {
+    // f takes the std::vector
+    auto index_vector = std::vector<size_t>(type.get_dimension().size());
+    size_t i = index_vector.size() - 1;
+    while (true) {
+
+    }
+}
+
 #undef check_type
+#undef ACCESS_DISPATCH
 
 class value {
 public:
@@ -184,13 +305,13 @@ struct expression {
     std::vector<var_t> invars;
     std::vector<value> outvals;
     std::vector<equation> equations;
-    u32 var_id = 0;
+    size_t var_id = 0;
 
     void add_input(var_t var);
     void add_output(value val);
     void add_equation(equation eq);
 
-    u32 new_var_id();
+    size_t new_var_id();
 };
 
 

@@ -50,7 +50,7 @@ public:
     void register_output(const jax::var_t& var);
 
 
-    template<std::convertible_to<u32>... Args>
+    template<std::convertible_to<size_t>... Args>
     jaxpr_tracer register_tracer(jax::type_enum base_type, Args... dimension) {
         return register_tracer(jax::type_t{base_type, dimension...});
     }
