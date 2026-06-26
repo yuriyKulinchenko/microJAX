@@ -87,6 +87,27 @@ void array_t::compute_strides() {
     }
 }
 
+#define DIMENSIONALITY_ERROR()                                                                      \
+if(type != other.get_type()) {                                                                      \
+    throw std::logic_error("ERROR: dimensionality mismatch when attempting elementwise operation"); \
+}
+
+#define BINARY_OP_OTHER(op, op_assign)                                      \
+array_t array_t::operator op (const array_t& other) {                       \
+    DIMENSIONALITY_ERROR();                                                 \
+    return std::visit([&](auto& vec) -> array_t {                           \
+        auto return_vec = vec;                                              \
+        auto other_vec = std::get<decltype(return_vec)>(other.value);       \
+        for (size_t i = 0; i < return_vec.size(); i++) {                    \
+            return_vec[i] op_assign other_vec[i];                           \
+        }                                                                   \
+        return array_t{type, return_vec};                                   \
+    }, value);                                                              \
+}
+
+BINARY_OP_OTHER(+, +=);
+BINARY_OP_OTHER(-, -=);
+BINARY_OP_OTHER(*, *=);
 
 const type_t& array_t::get_type() const {
     return type;

@@ -148,7 +148,7 @@ public:
     }
 
     template<typename T>
-    static array_t build (type_t type, invocable_r<T, const std::vector<size_t>&> auto f) {
+    static array_t build(type_t type, invocable_r<T, const std::vector<size_t>&> auto f) {
         // f takes the std::vector
         const auto& dimension_vector = type.get_dimension();
         auto index_vector = std::vector<size_t>(type.get_dimension().size(), 0);
@@ -168,6 +168,10 @@ public:
         return array_t{std::move(type), output_vector};
     }
 
+    template<typename T>
+    static array_t build_fill(type_t type, T value) {
+        return array_t{std::move(type), std::vector<T>(type.get_dimension().size(), value)};
+    }
 
     // ReSharper disable once CppNonExplicitConvertingConstructor
     array_t(f32 value);
@@ -190,6 +194,10 @@ public:
     T& access(const std::vector<size_t>& indices) {
         return std::get<std::vector<T>>(value)[flatten_index(stride, indices)];
     }
+
+    array_t operator+(const array_t& other);
+    array_t operator-(const array_t& other);
+    array_t operator*(const array_t& other);
 
     [[nodiscard]] const type_t& get_type() const;
     [[nodiscard]] const vector_variant& get_value() const;

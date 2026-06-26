@@ -14,6 +14,14 @@ T test_function(T x, T y) {
 
 int main() {
     using namespace jax;
+
+    array_t identity = array_t::build<f32>(type_t{type_enum::F32, 2, 2}, [](auto& i) {
+       return i[0] == i[1];
+    });
+
+    std::cout << (identity + identity) * (identity + identity);
+
+    return 0;
     // Construct tracer:
     jaxpr_builder builder {};
     jaxpr_tracer tracer_x = builder.register_tracer(type_enum::F32);
