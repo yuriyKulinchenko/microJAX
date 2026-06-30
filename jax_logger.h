@@ -10,10 +10,10 @@
 inline std::ostream& operator<<(std::ostream& stream, const jax::type_t& type) {
     stream << to_lower(jax::to_string(type.get_base_type()));
     stream << '[';
-    const std::vector<size_t>& dimension = type.get_dimension();
-    for (int i = 0; i < dimension.size(); i++) {
-        stream << dimension[i];
-        if (i != dimension.size() - 1) stream << ", ";
+    const std::vector<size_t>& shape = type.get_shape();
+    for (int i = 0; i < shape.size(); i++) {
+        stream << shape[i];
+        if (i != shape.size() - 1) stream << ", ";
     }
     stream << ']';
     return stream;
@@ -26,10 +26,10 @@ inline std::ostream& operator<<(std::ostream& stream, const jax::var_t& var) {
 
 inline std::ostream& operator<<(std::ostream& stream, const jax::array_t& array) {
 
-    const auto& dimension = array.get_type().get_dimension();
+    const auto& shape = array.get_type().get_shape();
     return std::visit([&](auto& flat_vector) -> std::ostream& {
-        auto index_vector = std::vector<size_t>(dimension.size(), 0);
-        size_t remaining_open_brackets = dimension.size();
+        auto index_vector = std::vector<size_t>(shape.size(), 0);
+        size_t remaining_open_brackets = shape.size();
 
         for (auto& element: flat_vector) {
 
@@ -43,7 +43,7 @@ inline std::ostream& operator<<(std::ostream& stream, const jax::array_t& array)
 
             // Emit sequence of ]]]...
             for (size_t j = index_vector.size(); j--> 0;) {
-                if (index_vector[j] < dimension[j] - 1) {
+                if (index_vector[j] < shape[j] - 1) {
                     index_vector[j]++;
                     stream << ", ";
                     break;
@@ -114,6 +114,17 @@ inline std::ostream& operator<<(std::ostream& stream, const jax::equation& eq) {
             stream << "[axes=";
             emit_tuple(stream, std::get<jax::reduce_sum_params>(eq.get_params()).axes);
             stream << ']';
+            break;
+        }
+
+        case jax::primitive_op::BROADCAST_IN_DIM: {
+            const auto& params = std::get<jax::broadcast_in_dim_params>(eq.get_params());
+            stream << "[shape=";
+            emit_tuple(stream, params.shape);
+            stream << ", broadcast_dimensions=";
+            emit_tuple(stream, params.broadcast_dimensions);
+            stream << ']';
+            break;
         }
         default:
     }

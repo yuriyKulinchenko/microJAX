@@ -55,6 +55,11 @@ T dot_general(T x,
         std::move(left_batch), std::move(right_batch));
 }
 
+template<typename T>
+T broadcast_in_dim(T x, std::vector<size_t> shape, std::vector<size_t> broadcast_dimensions) {
+    return x.broadcast_in_dim(std::move(shape), std::move(broadcast_dimensions));
+}
+
 }
 
 #endif //JAX_FUNCTIONS_H

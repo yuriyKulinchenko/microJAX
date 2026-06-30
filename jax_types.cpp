@@ -23,12 +23,12 @@ std::string_view to_string(type_enum t) {
 type_t::type_t(type_enum base_type):
 base_type(base_type) {}
 
-type_t::type_t(type_enum base_type, std::vector<size_t> dimension):
+type_t::type_t(type_enum base_type, std::vector<size_t> shape):
 base_type(base_type),
-dimension(std::move(dimension)) {}
+shape(std::move(shape)) {}
 
 bool type_t::operator==(const type_t& other) const {
-    return base_type == other.base_type && dimension == other.dimension;
+    return base_type == other.base_type && shape == other.shape;
 }
 
 bool type_t::is_i32() {
@@ -51,8 +51,8 @@ type_enum type_t::get_base_type() const {
     return base_type;
 }
 
-const std::vector<size_t>& type_t::get_dimension() const {
-    return dimension;
+const std::vector<size_t>& type_t::get_shape() const {
+    return shape;
 }
 
 var_t::var_t(size_t id, type_t type): id(id), type(std::move(type)) {}
@@ -75,8 +75,8 @@ array_t::array_t(f32 value)
 }
 
 void array_t::compute_strides() {
-    const std::vector<size_t>& dimension = type.get_dimension();
-    stride.resize(dimension.size());
+    const std::vector<size_t>& shape = type.get_shape();
+    stride.resize(shape.size());
     if (stride.empty()) {
         return;
     }
@@ -85,7 +85,7 @@ void array_t::compute_strides() {
 
     stride[stride.size() - 1] = 1;
     for (size_t i = stride.size() - 1; i-->0;) {
-        stride[i] = stride[i + 1] * dimension[i + 1];
+        stride[i] = stride[i + 1] * shape[i + 1];
     }
 }
 
@@ -190,7 +190,7 @@ primitive_op equation::get_op() const {
     return op;
 }
 
-const params_variant equation::get_params() const {
+const params_variant& equation::get_params() const {
     return params;
 }
 

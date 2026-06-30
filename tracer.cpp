@@ -98,8 +98,8 @@ jaxpr_tracer jaxpr_tracer::exp() const {
 jaxpr_tracer jaxpr_tracer::transpose(std::vector<size_t> permutation) const {
     // The transpose must actually be possible:
 
-    const auto& old_dimension = var.get_type().get_dimension();
-    if (old_dimension.size() != permutation.size()) {
+    const auto& old_shape = var.get_type().get_shape();
+    if (old_shape.size() != permutation.size()) {
         throw std::logic_error("Error: shape of argument is invalid for transpose");
     }
 
@@ -107,14 +107,14 @@ jaxpr_tracer jaxpr_tracer::transpose(std::vector<size_t> permutation) const {
         throw std::logic_error("Error: permutation in transpose is invalid");
     }
 
-    // The new type dimensions have to be calculated:
+    // The new type shape has to be calculated:
 
-    std::vector<size_t> new_dimension(old_dimension.size());
+    std::vector<size_t> new_shape(old_shape.size());
     for (size_t i = 0; i < permutation.size(); i++) {
-        new_dimension[i] = old_dimension[permutation[i]];
+        new_shape[i] = old_shape[permutation[i]];
     }
 
-    type_t new_type {var.get_type().get_base_type(), std::move(new_dimension)};
+    type_t new_type {var.get_type().get_base_type(), std::move(new_shape)};
 
 
 
@@ -125,10 +125,10 @@ jaxpr_tracer jaxpr_tracer::transpose(std::vector<size_t> permutation) const {
 jaxpr_tracer jaxpr_tracer::reduce_sum(std::vector<size_t> axes) const {
     // Axes must be valid:
 
-    const auto& old_dimension = var.get_type().get_dimension();
-    std::vector excluded(old_dimension.size(), false);
+    const auto& old_shape = var.get_type().get_shape();
+    std::vector excluded(old_shape.size(), false);
     for (auto axis: axes) {
-        if (axis >= old_dimension.size()) {
+        if (axis >= old_shape.size()) {
             throw formatted_error(
                 "Error: axis {} does not exist for the given argument in reduce_sum", axis);
         }
@@ -141,13 +141,13 @@ jaxpr_tracer jaxpr_tracer::reduce_sum(std::vector<size_t> axes) const {
 
     // Apply new shape:
 
-    std::vector<size_t> new_dimension(old_dimension.size() - axes.size());
-    for (size_t i = 0, j = 0; i < old_dimension.size(); i++) {
+    std::vector<size_t> new_shape(old_shape.size() - axes.size());
+    for (size_t i = 0, j = 0; i < old_shape.size(); i++) {
         if (excluded[i]) continue;
-        new_dimension[j++] = old_dimension[i];
+        new_shape[j++] = old_shape[i];
     }
 
-    type_t new_type {var.get_type().get_base_type(), std::move(new_dimension)};
+    type_t new_type {var.get_type().get_base_type(), std::move(new_shape)};
 
     return unary_op(value{var}, std::move(new_type),  primitive_op::REDUCE_SUM,
         reduce_sum_params{axes}, builder);
@@ -161,10 +161,48 @@ jaxpr_tracer jaxpr_tracer::dot_general(
     return {builder, var};
 }
 
+jaxpr_tracer jaxpr_tracer::broadcast_in_dim(std::vector<size_t> shape,
+    std::vector<size_t> broadcast_dimensions) const {
+    // If shape(x) = (2, 3)
+    // if broadcast_dimensions=(0, 2), shape=(2,4,3) then:
+    // y_i0,i1,i2 = x_i0,i2
 
+    // broadcast_dimensions have to match:
+    const auto& old_shape = var.get_type().get_shape();
+    if (old_shape.size() != broadcast_dimensions.size()) {
+        throw formatted_error("Error: expected {} axes in broadcast_dimensions, got {}",
+            old_shape.size(), broadcast_dimensions.size());
+    }
 
+    // Enforce that broadcast_dimensions is strictly increasing, with no duplicates,
+    // and that the sizes of mapped axes match
 
+    if (broadcast_dimensions.size() != 0) {
+        size_t max = broadcast_dimensions[0];
+        for (size_t i = 1; i < broadcast_dimensions.size(); i++) {
 
+            if (broadcast_dimensions[i] <= max) {
+                throw std::logic_error(
+                    "Error: broadcast_dimensions must be strictly increasing with no duplicates");
+            }
+
+            // The mapping must be valid:
+            if (broadcast_dimensions[i] >= shape.size() ||
+                !(old_shape[i] == shape[broadcast_dimensions[i]] || old_shape[i] == 1)) {
+                throw std::logic_error("Error: axes are incompatible in broadcast_dim");
+            }
+
+            max = broadcast_dimensions[i];
+        }
+    }
+
+    type_t new_type {var.get_type().get_base_type(), shape};
+    return unary_op(
+        value{var}, std::move(new_type), primitive_op::BROADCAST_IN_DIM,
+        broadcast_in_dim_params{std::move(shape),
+            std::move(broadcast_dimensions)},
+            builder);
+}
 
 jaxpr_tracer jaxpr_builder::register_tracer(type_t type) {
     auto var = var_t{jaxpr.new_var_id(), std::move(type)};

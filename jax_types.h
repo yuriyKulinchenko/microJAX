@@ -20,7 +20,8 @@ namespace jax {
 #define PRIMITIVE_OP_LIST(X)                    \
     X(ADD) X(SUB) X(MUL) X(SIN)                 \
     X(COS) X(EXP) X(LOG) X(NEG)                 \
-    X(TRANSPOSE) X(REDUCE_SUM) X(DOT_GENERAL)
+    X(TRANSPOSE) X(REDUCE_SUM)                  \
+    X(DOT_GENERAL) X(BROADCAST_IN_DIM)
 
 #define TYPE_ENUM_LIST(X) \
     X(I32) X(I64) X(F32) X(F64)
@@ -45,11 +46,11 @@ public:
 
     explicit type_t(type_enum base_type);
 
-    type_t(type_enum base_type, std::vector<size_t> dimension);
+    type_t(type_enum base_type, std::vector<size_t> shape);
 
     template<std::convertible_to<size_t>... Dims>
-    explicit type_t(type_enum base_type, Dims... dimension)
-    : base_type(base_type), dimension{static_cast<size_t>(dimension)...} {}
+    explicit type_t(type_enum base_type, Dims... shape)
+    : base_type(base_type), shape{static_cast<size_t>(shape)...} {}
 
 
     bool operator==(const type_t& other) const;
@@ -60,11 +61,11 @@ public:
     bool is_f64();
 
     [[nodiscard]] type_enum get_base_type() const;
-    [[nodiscard]] const std::vector<size_t>& get_dimension() const;
+    [[nodiscard]] const std::vector<size_t>& get_shape() const;
 
 private:
     type_enum base_type;
-    std::vector<size_t> dimension;
+    std::vector<size_t> shape;
 };
 
 class var_t {
@@ -99,9 +100,9 @@ using span_variant = std::variant<
     std::span<const f32>,std::span<const f64>
 >;
 
-inline size_t num_elements(std::span<const size_t> dimension) {
+inline size_t num_elements(std::span<const size_t> shape) {
     size_t total = 1;
-    for (size_t dim : dimension) total *= dim;
+    for (size_t dim : shape) total *= dim;
     return total;
 }
 
@@ -142,7 +143,7 @@ public:
         check_type(f32, F32);
         check_type(f64, F64);
 
-        if (std::get<std::vector<T>>(this->value).size() != num_elements(this->type.get_dimension())) {
+        if (std::get<std::vector<T>>(this->value).size() != num_elements(this->type.get_shape())) {
             throw std::logic_error("Error: array value does not match the size of its dimensions");
         }
 
@@ -153,14 +154,14 @@ public:
     template<typename T>
     static array_t build(type_t type, invocable_r<T, const std::vector<size_t>&> auto f) {
         // f takes the std::vector
-        const auto& dimension_vector = type.get_dimension();
-        auto index_vector = std::vector<size_t>(type.get_dimension().size(), 0);
-        auto output_vector = std::vector<T>(num_elements(type.get_dimension()));
+        const auto& shape_vector = type.get_shape();
+        auto index_vector = std::vector<size_t>(type.get_shape().size(), 0);
+        auto output_vector = std::vector<T>(num_elements(type.get_shape()));
 
         for(auto& output: output_vector) {
             output = f(index_vector);
             for (size_t j = index_vector.size(); j--> 0;) {
-                if (index_vector[j] < dimension_vector[j] - 1) {
+                if (index_vector[j] < shape_vector[j] - 1) {
                     index_vector[j]++;
                     break;
                 }
@@ -176,13 +177,13 @@ public:
         switch (type.get_base_type()) {
             using enum type_enum;
             case I32:
-            return array_t{std::move(type), std::vector<i32>(num_elements(type.get_dimension()), value)};
+            return array_t{std::move(type), std::vector<i32>(num_elements(type.get_shape()), value)};
             case I64:
-            return array_t{std::move(type), std::vector<i64>(num_elements(type.get_dimension()), value)};
+            return array_t{std::move(type), std::vector<i64>(num_elements(type.get_shape()), value)};
             case F32:
-            return array_t{std::move(type), std::vector<f32>(num_elements(type.get_dimension()), value)};
+            return array_t{std::move(type), std::vector<f32>(num_elements(type.get_shape()), value)};
             case F64:
-            return array_t{std::move(type), std::vector<f64>(num_elements(type.get_dimension()), value)};
+            return array_t{std::move(type), std::vector<f64>(num_elements(type.get_shape()), value)};
             default:
             return array_t{0};
         }
@@ -240,10 +241,10 @@ private:
 
 struct type_span {
     type_enum base_type;
-    std::span<const size_t> dimension;
+    std::span<const size_t> shape;
 
     [[nodiscard]] type_enum get_base_type() const { return base_type; }
-    [[nodiscard]] std::span<const size_t> get_dimension() const { return dimension; }
+    [[nodiscard]] std::span<const size_t> get_shape() const { return shape; }
 };
 
 // Non-owning view, potentially to a subset of the array
@@ -258,14 +259,14 @@ public:
             i_0 += array.stride[i] * indices[i];
         }
 
-        const auto& array_dimension = array.type.get_dimension();
-        type.dimension = std::span{array_dimension.begin() + indices.size(), array_dimension.end()};
+        const auto& array_shape = array.type.get_shape();
+        type.shape = std::span{array_shape.begin() + indices.size(), array_shape.end()};
 
         const auto& array_stride = array.stride;
         stride = std::span {array_stride.begin() + indices.size(), array_stride.end()};
 
-        // dimension_size(i) = stride[i] * dimension[i]
-        size_t total_size = array.stride[indices.size()] * array.type.get_dimension()[indices.size()];
+        // shape_size(i) = stride[i] * shape[i]
+        size_t total_size = array.stride[indices.size()] * array.type.get_shape()[indices.size()];
         value = std::visit([=](const auto& vec) -> span_variant {
             return std::span{vec.begin() + i_0, total_size};
         }, array.value);
@@ -304,7 +305,7 @@ private:
 // jax::array::build(type, f)
 // f : const std::vector<size_t>& -> T
 // Challenge is dyanmic iteration through indices, without relying on expensive recursion etc
-// Ideally, implement a linear scan over dimension
+// Ideally, implement a linear scan over shape
 // Manually maintain an index stack!
 
 #undef check_type
@@ -349,7 +350,18 @@ struct reduce_sum_params {
     std::vector<size_t> axes;
 };
 
-using params_variant = std::variant<std::monostate, transpose_params, dot_general_params, reduce_sum_params>;
+struct broadcast_in_dim_params {
+    std::vector<size_t> shape;
+    std::vector<size_t> broadcast_dimensions;
+};
+
+using params_variant = std::variant<
+    std::monostate,
+    transpose_params,
+    dot_general_params,
+    reduce_sum_params,
+    broadcast_in_dim_params
+>;
 
 class equation {
 public:
@@ -361,7 +373,7 @@ public:
     [[nodiscard]] const value& get_input(size_t i) const;
     [[nodiscard]] const var_t& get_output(size_t i) const;
     [[nodiscard]] primitive_op get_op() const;
-    [[nodiscard]] const params_variant get_params() const;
+    [[nodiscard]] const params_variant& get_params() const;
 
 
 private:

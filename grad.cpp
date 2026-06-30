@@ -315,7 +315,7 @@ expression grad_class::find_grad(value seed) {
 
     const var_t& output_var = input_expr.outvals[0].get_var();
 
-    if (output_var.get_type().get_dimension().size() != 0) {
+    if (output_var.get_type().get_shape().size() != 0) {
         throw formatted_error("Error: shape of output variable must be scalar");
     }
 

@@ -39,8 +39,14 @@ public:
 
     [[nodiscard]] jaxpr_tracer transpose(std::vector<size_t> permutation) const;
     [[nodiscard]] jaxpr_tracer reduce_sum(std::vector<size_t> axes) const;
-    [[nodiscard]] jaxpr_tracer dot_general(std::vector<size_t> left_contract, std::vector<size_t> right_contract,
-    std::vector<size_t> left_batch, std::vector<size_t> right_batch) const;
+    [[nodiscard]] jaxpr_tracer dot_general(
+        std::vector<size_t> left_contract,
+        std::vector<size_t> right_contract,
+        std::vector<size_t> left_batch,
+        std::vector<size_t> right_batch) const;
+    [[nodiscard]] jaxpr_tracer broadcast_in_dim(
+        std::vector<size_t> shape,
+        std::vector<size_t> broadcast_dimensions) const;
 
 private:
     jax::var_t var;
@@ -57,8 +63,8 @@ public:
 
 
     template<std::convertible_to<size_t>... Args>
-    jaxpr_tracer register_tracer(jax::type_enum base_type, Args... dimension) {
-        return register_tracer(jax::type_t{base_type, dimension...});
+    jaxpr_tracer register_tracer(jax::type_enum base_type, Args... shape) {
+        return register_tracer(jax::type_t{base_type, shape...});
     }
 
     [[nodiscard]] jax::expression&& get_jaxpr();

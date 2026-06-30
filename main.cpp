@@ -16,9 +16,10 @@ int main() {
     using namespace jax;
     // Construct tracer:
     jaxpr_builder builder {};
-    jaxpr_tracer tracer_x = builder.register_tracer(type_enum::F32, 10, 15, 20);
+    jaxpr_tracer tracer_x = builder.register_tracer(type_enum::F32);
 
-    auto transposed_value = transpose(tracer_x, {2, 0, 1});
+    auto broadcast_value = broadcast_in_dim(tracer_x, {10, 15, 20}, {});
+    auto transposed_value = transpose(broadcast_value, {2, 0, 1});
     auto output = reduce_sum(transposed_value, {0, 1, 2});
 
     builder.register_output(output);
