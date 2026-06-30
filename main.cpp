@@ -16,11 +16,12 @@ int main() {
     using namespace jax;
     // Construct tracer:
     jaxpr_builder builder {};
+
     jaxpr_tracer tracer_x = builder.register_tracer(type_enum::F32, 10, 15, 20);
-    auto output = reduce_sum(tracer_x, {0, 1, 2});
+    auto broadcasted = broadcast_in_dim(tracer_x, {10, 5, 15, 7, 20}, {0, 2, 4});
+    auto output = reduce_sum(broadcasted, {0, 1, 2, 3, 4});
 
     builder.register_output(output);
-
     expression jaxpr = builder.get_jaxpr();
 
     std::cout << "Original expression:\n";
@@ -30,5 +31,4 @@ int main() {
     std::cout << grad(jaxpr);
 
     return 0;
-
 }

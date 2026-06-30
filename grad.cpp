@@ -238,6 +238,18 @@ void grad_class::propagate_adjoints(const equation& eq) {
             break;
         }
 
+        case EXP: {
+            auto& output_var = eq.get_output(0);
+            auto* output_adj = get_adjoint(output_var);
+            if (!output_adj) break;
+
+            auto& input_var = eq.get_input(0).get_var();
+
+            // Derivative of y = exp(x) is y
+            update_adjoint(input_var, value{output_var}, *output_adj);
+            break;
+        }
+
         case NEG: {
             auto& output_var = eq.get_output(0);
             auto* output_adj = get_adjoint(output_var);
@@ -331,11 +343,71 @@ void grad_class::propagate_adjoints(const equation& eq) {
                 std::vector{*output_adj},
                 std::vector{broadcast_adjoint},
                 BROADCAST_IN_DIM,
-                broadcast_in_dim_params{input_var.get_type().get_shape(), axes_complement}
+                broadcast_in_dim_params{input_var.get_type().get_shape(),
+                    std::move(axes_complement)}
             );
 
             update_adjoint(input_var, value{broadcast_adjoint});
             break;
+        }
+
+        case BROADCAST_IN_DIM: {
+
+            // TODO: implement handling of stretching
+
+            /*
+            Notes for tomorrow:
+
+            Suppose you perform a broadcast (5,1,3) -> (5,10,9,15,3),
+            where 10 and 15 are newly inserted, and 1 is stretched to 9.
+
+            The adjoint for the input X will be a summation over the ranks
+            with sizes 10, 9 and 5 followed by another broadcast that re-inserts
+            the size 1 rank.
+            */
+
+            auto& output_var = eq.get_output(0);
+            auto* output_adj = get_adjoint(output_var);
+            if (!output_adj) break;
+
+            // If output_adj is 0, there will be no contribution to the adjoint:
+            if (output_adj->is<array_t>()) {
+                auto& output_adj_array = output_adj->get_array();
+                if (output_adj_array.has_single_value(0)) break;
+            }
+
+            auto& input_val = eq.get_input(0);
+            if (input_val.is<array_t>()) break;
+            auto& input_var = input_val.get_var();
+
+            // The adjoint is a summation over the newly added ranks
+            // The newly added ranks are the complement of broadcast_dimensions
+
+            const auto& params = std::get<broadcast_in_dim_params>(eq.get_params());
+            const auto& output_shape = params.shape;
+            const auto& broadcast_dims = params.broadcast_dimensions;
+
+            std::vector<size_t> broadcast_dims_complement(output_shape.size() - broadcast_dims.size());
+            for (size_t i = 0, j = 0, k = 0; i < output_shape.size(); i++) {
+                if (k < broadcast_dims.size() && broadcast_dims[k] == i) { k++; continue; }
+                broadcast_dims_complement[j++] = i;
+            }
+
+            auto summed_adjoint = fresh_var(input_var.get_type());
+
+            output_expr.equations.emplace_back(
+                std::vector{*output_adj},
+                std::vector{summed_adjoint},
+                REDUCE_SUM,
+                reduce_sum_params{std::move(broadcast_dims_complement)}
+            );
+
+            update_adjoint(input_var, value{summed_adjoint});
+            break;
+        }
+
+        case DOT_GENERAL: {
+
         }
 
         default: {
