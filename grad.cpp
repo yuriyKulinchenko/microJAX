@@ -298,6 +298,46 @@ void grad_class::propagate_adjoints(const equation& eq) {
             break;
         }
 
+        case REDUCE_SUM: {
+            auto& output_var = eq.get_output(0);
+            auto* output_adj = get_adjoint(output_var);
+            if (!output_adj) break;
+
+            // If output_adj is 0, there will be no contribution to the adjoint:
+            if (output_adj->is<array_t>()) {
+                auto& output_adj_array = output_adj->get_array();
+                if (output_adj_array.has_single_value(0)) break;
+            }
+
+            auto& input_val = eq.get_input(0);
+            if (input_val.is<array_t>()) break;
+            auto& input_var = input_val.get_var();
+
+            // The adjoint is a broadcast of the output_adj
+            // The broadcast_dimensions are the complement of the axes:
+
+            const auto& input_shape = input_var.get_type().get_shape();
+            const auto& axes = std::get<reduce_sum_params>(eq.get_params()).axes;
+
+            std::vector<size_t> axes_complement(input_shape.size() - axes.size());
+            for (size_t i = 0, j = 0, k = 0; i < input_shape.size(); i++) {
+                if (k < axes.size() && axes[k] == i) { k++; continue; }
+                axes_complement[j++] = i;
+            }
+
+            auto broadcast_adjoint = fresh_var(input_var.get_type());
+
+            output_expr.equations.emplace_back(
+                std::vector{*output_adj},
+                std::vector{broadcast_adjoint},
+                BROADCAST_IN_DIM,
+                broadcast_in_dim_params{input_var.get_type().get_shape(), axes_complement}
+            );
+
+            update_adjoint(input_var, value{broadcast_adjoint});
+            break;
+        }
+
         default: {
             throw std::logic_error{"Error: Not implemented"};
         }
@@ -348,8 +388,7 @@ expression grad_class::find_grad(value seed) {
     // Populate outputs:
 
     for (auto& var: input_expr.invars) {
-        value* val = get_adjoint(var);
-        if (val) {
+        if (value* val = get_adjoint(var)) {
             // The adjoint exists:
             output_expr.outvals.push_back(*val);
         } else {

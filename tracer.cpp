@@ -126,39 +126,33 @@ jaxpr_tracer jaxpr_tracer::reduce_sum(std::vector<size_t> axes) const {
     // Axes must be valid:
 
     const auto& old_shape = var.get_type().get_shape();
-    std::vector excluded(old_shape.size(), false);
-    for (auto axis: axes) {
-        if (axis >= old_shape.size()) {
+    std::ranges::sort(axes);
+
+    size_t max = 0;
+    for (size_t i = 0; i < axes.size(); i++) {
+        if (axes[i] >= old_shape.size()) {
             throw formatted_error(
-                "Error: axis {} does not exist for the given argument in reduce_sum", axis);
+                    "Error: axis {} does not exist for the given argument in reduce_sum", axes[i]);
         }
-        if (excluded[axis]) {
+        if (i > 0 && axes[i] == max) {
             throw formatted_error(
-                "Error: axis {} is included more than once in reduce_sum", axis);
+                    "Error: axis {} is included more than once in reduce_sum", axes[i]);
         }
-        excluded[axis] = true;
+        max = axes[i];
     }
 
     // Apply new shape:
 
     std::vector<size_t> new_shape(old_shape.size() - axes.size());
-    for (size_t i = 0, j = 0; i < old_shape.size(); i++) {
-        if (excluded[i]) continue;
+    for (size_t i = 0, j = 0, k = 0; i < old_shape.size(); i++) {
+        if (k < axes.size() && axes[k] == i) { k++; continue; }
         new_shape[j++] = old_shape[i];
     }
 
     type_t new_type {var.get_type().get_base_type(), std::move(new_shape)};
 
-    return unary_op(value{var}, std::move(new_type),  primitive_op::REDUCE_SUM,
-        reduce_sum_params{axes}, builder);
-
-}
-
-jaxpr_tracer jaxpr_tracer::dot_general(
-    std::vector<size_t> left_contract, std::vector<size_t> right_contract,
-    std::vector<size_t> left_batch, std::vector<size_t> right_batch) const {
-    // TODO: implement this
-    return {builder, var};
+    return unary_op(value{var}, std::move(new_type), primitive_op::REDUCE_SUM,
+        reduce_sum_params{std::move(axes)}, builder);
 }
 
 jaxpr_tracer jaxpr_tracer::broadcast_in_dim(std::vector<size_t> shape,
@@ -202,6 +196,13 @@ jaxpr_tracer jaxpr_tracer::broadcast_in_dim(std::vector<size_t> shape,
         broadcast_in_dim_params{std::move(shape),
             std::move(broadcast_dimensions)},
             builder);
+}
+
+jaxpr_tracer jaxpr_tracer::dot_general(
+    std::vector<size_t> left_contract, std::vector<size_t> right_contract,
+    std::vector<size_t> left_batch, std::vector<size_t> right_batch) const {
+    // TODO: implement this
+    return {builder, var};
 }
 
 jaxpr_tracer jaxpr_builder::register_tracer(type_t type) {
