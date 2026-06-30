@@ -1,5 +1,7 @@
 #include "tracer.h"
 
+#include <unordered_set>
+
 #include "jax_functions.h"
 
 using namespace jax;
@@ -95,7 +97,9 @@ jaxpr_tracer jaxpr_tracer::exp() const {
 
 jaxpr_tracer jaxpr_tracer::transpose(std::vector<size_t> permutation) const {
     // The transpose must actually be possible:
-    if (get_type().get_dimension().size() != permutation.size()) {
+
+    const auto& old_dimension = var.get_type().get_dimension();
+    if (old_dimension.size() != permutation.size()) {
         throw std::logic_error("Error: shape of argument is invalid for transpose");
     }
 
@@ -105,19 +109,61 @@ jaxpr_tracer jaxpr_tracer::transpose(std::vector<size_t> permutation) const {
 
     // The new type dimensions have to be calculated:
 
-    const auto& old_dimension = var.get_type().get_dimension();
     std::vector<size_t> new_dimension(old_dimension.size());
     for (size_t i = 0; i < permutation.size(); i++) {
         new_dimension[i] = old_dimension[permutation[i]];
     }
 
-    type_t new_type = type_t{var.get_type().get_base_type(), std::move(new_dimension)};
+    type_t new_type {var.get_type().get_base_type(), std::move(new_dimension)};
 
 
 
     return unary_op(value{var}, std::move(new_type),  primitive_op::TRANSPOSE,
         transpose_params{std::move(permutation)}, builder);
 }
+
+jaxpr_tracer jaxpr_tracer::reduce_sum(std::vector<size_t> axes) const {
+    // Axes must be valid:
+
+    const auto& old_dimension = var.get_type().get_dimension();
+    std::vector excluded(old_dimension.size(), false);
+    for (auto axis: axes) {
+        if (axis >= old_dimension.size()) {
+            throw formatted_error(
+                "Error: axis {} does not exist for the given argument in reduce_sum", axis);
+        }
+        if (excluded[axis]) {
+            throw formatted_error(
+                "Error: axis {} is included more than once in reduce_sum", axis);
+        }
+        excluded[axis] = true;
+    }
+
+    // Apply new shape:
+
+    std::vector<size_t> new_dimension(old_dimension.size() - axes.size());
+    for (size_t i = 0, j = 0; i < old_dimension.size(); i++) {
+        if (excluded[i]) continue;
+        new_dimension[j++] = old_dimension[i];
+    }
+
+    type_t new_type {var.get_type().get_base_type(), std::move(new_dimension)};
+
+    return unary_op(value{var}, std::move(new_type),  primitive_op::REDUCE_SUM,
+        reduce_sum_params{axes}, builder);
+
+}
+
+jaxpr_tracer jaxpr_tracer::dot_general(
+    std::vector<size_t> left_contract, std::vector<size_t> right_contract,
+    std::vector<size_t> left_batch, std::vector<size_t> right_batch) const {
+    // TODO: implement this
+    return {builder, var};
+}
+
+
+
+
 
 
 jaxpr_tracer jaxpr_builder::register_tracer(type_t type) {

@@ -17,8 +17,10 @@ using f64 = double;
 
 namespace jax {
 
-#define PRIMITIVE_OP_LIST(X) \
-    X(ADD) X(SUB) X(MUL) X(SIN) X(COS) X(EXP) X(LOG) X(NEG) X(TRANSPOSE)
+#define PRIMITIVE_OP_LIST(X)                    \
+    X(ADD) X(SUB) X(MUL) X(SIN)                 \
+    X(COS) X(EXP) X(LOG) X(NEG)                 \
+    X(TRANSPOSE) X(REDUCE_SUM) X(DOT_GENERAL)
 
 #define TYPE_ENUM_LIST(X) \
     X(I32) X(I64) X(F32) X(F64)
@@ -343,7 +345,11 @@ struct dot_general_params {
     std::vector<size_t> right_batch;
 };
 
-using params_variant = std::variant<std::monostate, transpose_params, dot_general_params>;
+struct reduce_sum_params {
+    std::vector<size_t> axes;
+};
+
+using params_variant = std::variant<std::monostate, transpose_params, dot_general_params, reduce_sum_params>;
 
 class equation {
 public:

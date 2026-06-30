@@ -39,7 +39,20 @@ inline bool valid_permutation(const std::vector<size_t>& permutation) {
 
 template<typename T>
 T transpose(T x, std::vector<size_t> permutation) {
-    return x.transpose(permutation);
+    return x.transpose(std::move(permutation));
+}
+
+template<typename T>
+T reduce_sum(T x, std::vector<size_t> axes) {
+    return x.reduce_sum(std::move(axes));
+}
+
+template<typename T>
+T dot_general(T x,
+    std::vector<size_t> left_contract, std::vector<size_t> right_contract,
+    std::vector<size_t> left_batch, std::vector<size_t> right_batch) {
+    return x.dot_general(std::move(left_contract), std::move(right_contract),
+        std::move(left_batch), std::move(right_batch));
 }
 
 }

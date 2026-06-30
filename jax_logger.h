@@ -109,6 +109,12 @@ inline std::ostream& operator<<(std::ostream& stream, const jax::equation& eq) {
             stream << ']';
             break;
         }
+
+        case jax::primitive_op::REDUCE_SUM: {
+            stream << "[axes=";
+            emit_tuple(stream, std::get<jax::reduce_sum_params>(eq.get_params()).axes);
+            stream << ']';
+        }
         default:
     }
     stream << ' ';

@@ -36,7 +36,11 @@ public:
     [[nodiscard]] jaxpr_tracer sin() const;
     [[nodiscard]] jaxpr_tracer cos() const;
     [[nodiscard]] jaxpr_tracer exp() const;
+
     [[nodiscard]] jaxpr_tracer transpose(std::vector<size_t> permutation) const;
+    [[nodiscard]] jaxpr_tracer reduce_sum(std::vector<size_t> axes) const;
+    [[nodiscard]] jaxpr_tracer dot_general(std::vector<size_t> left_contract, std::vector<size_t> right_contract,
+    std::vector<size_t> left_batch, std::vector<size_t> right_batch) const;
 
 private:
     jax::var_t var;
