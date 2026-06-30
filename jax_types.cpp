@@ -190,10 +190,23 @@ primitive_op equation::get_op() const {
     return op;
 }
 
+const params_variant equation::get_params() const {
+    return params;
+}
+
+
 equation::equation(std::vector<value> input, std::vector<var_t> output, primitive_op op):
 input(std::move(input)),
 output(std::move(output)),
-op(op) {}
+op(op)
+{}
+
+equation::equation(std::vector<value> input, std::vector<var_t> output, primitive_op op, params_variant params):
+input(std::move(input)),
+output(std::move(output)),
+op(op),
+params(params)
+{}
 
 void expression::add_input(var_t var) {
     invars.push_back(std::move(var));

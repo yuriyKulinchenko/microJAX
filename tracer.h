@@ -36,6 +36,8 @@ public:
     [[nodiscard]] jaxpr_tracer sin() const;
     [[nodiscard]] jaxpr_tracer cos() const;
     [[nodiscard]] jaxpr_tracer exp() const;
+    [[nodiscard]] jaxpr_tracer transpose(std::vector<size_t> permutation) const;
+
 private:
     jax::var_t var;
     jaxpr_builder& builder;

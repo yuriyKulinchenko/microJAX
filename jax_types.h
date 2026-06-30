@@ -18,7 +18,7 @@ using f64 = double;
 namespace jax {
 
 #define PRIMITIVE_OP_LIST(X) \
-    X(ADD) X(SUB) X(MUL) X(SIN) X(COS) X(EXP) X(LOG) X(NEG)
+    X(ADD) X(SUB) X(MUL) X(SIN) X(COS) X(EXP) X(LOG) X(NEG) X(TRANSPOSE)
 
 #define TYPE_ENUM_LIST(X) \
     X(I32) X(I64) X(F32) X(F64)
@@ -330,21 +330,39 @@ private:
 // An equation will look something like:
 // a:f32[8] = sin b
 // c:f32[] = add a b
+
+
+struct transpose_params {
+    std::vector<size_t> permutation;
+};
+
+struct dot_general_params {
+    std::vector<size_t> left_contract;
+    std::vector<size_t> right_contract;
+    std::vector<size_t> left_batch;
+    std::vector<size_t> right_batch;
+};
+
+using params_variant = std::variant<std::monostate, transpose_params, dot_general_params>;
+
 class equation {
 public:
     equation(std::vector<value> input, std::vector<var_t> output, primitive_op op);
+    equation(std::vector<value> input, std::vector<var_t> output, primitive_op op, params_variant params);
 
     [[nodiscard]] const std::vector<value>& get_input() const;
     [[nodiscard]] const std::vector<var_t>& get_output() const;
     [[nodiscard]] const value& get_input(size_t i) const;
     [[nodiscard]] const var_t& get_output(size_t i) const;
     [[nodiscard]] primitive_op get_op() const;
+    [[nodiscard]] const params_variant get_params() const;
 
 
 private:
     std::vector<value> input;
     std::vector<var_t> output;
     primitive_op op;
+    params_variant params;
 };
 
 struct expression {

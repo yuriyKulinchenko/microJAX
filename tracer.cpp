@@ -1,12 +1,16 @@
 #include "tracer.h"
 
+#include "jax_functions.h"
+
+using namespace jax;
+
 jaxpr_tracer elementwise_binary_op(
-    const jax::value& v1,
-    const jax::value& v2,
-    jax::primitive_op op,
+    const value& v1,
+    const value& v2,
+    primitive_op op,
     jaxpr_builder& builder
     ) {
-    jax::var_t new_var {builder.jaxpr.new_var_id(), v1.get_type()};
+    var_t new_var {builder.jaxpr.new_var_id(), v1.get_type()};
 
     builder.jaxpr.equations.emplace_back(
         std::vector{v1, v2},
@@ -17,13 +21,27 @@ jaxpr_tracer elementwise_binary_op(
     return {builder, new_var};
 }
 
-jaxpr_tracer unary_op(const jax::value& val, jax::primitive_op op, jaxpr_builder& builder) {
-    jax::var_t new_var {builder.jaxpr.new_var_id(), val.get_type()};
+jaxpr_tracer unary_op(const value& val, primitive_op op, jaxpr_builder& builder) {
+    var_t new_var {builder.jaxpr.new_var_id(), val.get_type()};
 
     builder.jaxpr.equations.emplace_back(
         std::vector{val},
         std::vector{new_var},
         op
+    );
+
+    return {builder, new_var};
+}
+
+jaxpr_tracer unary_op(const value& val, type_t type, primitive_op op,
+    params_variant params, jaxpr_builder& builder) {
+    var_t new_var {builder.jaxpr.new_var_id(), std::move(type)};
+
+    builder.jaxpr.equations.emplace_back(
+        std::vector{val},
+        std::vector{new_var},
+        op,
+        params
     );
 
     return {builder, new_var};
@@ -64,39 +82,66 @@ ELEMENTWISE_BINARY_OP(*, jax::primitive_op::MUL);
 ELEMENTWISE_BINARY_OP(-, jax::primitive_op::SUB);
 
 jaxpr_tracer jaxpr_tracer::sin() const {
-    return unary_op(jax::value{var}, jax::primitive_op::SIN, builder);
+    return unary_op(value{var}, primitive_op::SIN, builder);
 }
 
 jaxpr_tracer jaxpr_tracer::cos() const {
-    return unary_op(jax::value{var}, jax::primitive_op::COS, builder);
+    return unary_op(value{var}, primitive_op::COS, builder);
 }
 
 jaxpr_tracer jaxpr_tracer::exp() const {
-    return unary_op(jax::value{var}, jax::primitive_op::EXP, builder);
+    return unary_op(value{var}, primitive_op::EXP, builder);
 }
 
-jaxpr_tracer jaxpr_builder::register_tracer(jax::type_t type) {
-    auto var = jax::var_t{jaxpr.new_var_id(), std::move(type)};
+jaxpr_tracer jaxpr_tracer::transpose(std::vector<size_t> permutation) const {
+    // The transpose must actually be possible:
+    if (get_type().get_dimension().size() != permutation.size()) {
+        throw std::logic_error("Error: shape of argument is invalid for transpose");
+    }
+
+    if (!valid_permutation(permutation)) {
+        throw std::logic_error("Error: permutation in transpose is invalid");
+    }
+
+    // The new type dimensions have to be calculated:
+
+    const auto& old_dimension = var.get_type().get_dimension();
+    std::vector<size_t> new_dimension(old_dimension.size());
+    for (size_t i = 0; i < permutation.size(); i++) {
+        new_dimension[i] = old_dimension[permutation[i]];
+    }
+
+    type_t new_type = type_t{var.get_type().get_base_type(), std::move(new_dimension)};
+
+
+
+    return unary_op(value{var}, std::move(new_type),  primitive_op::TRANSPOSE,
+        transpose_params{std::move(permutation)}, builder);
+}
+
+
+jaxpr_tracer jaxpr_builder::register_tracer(type_t type) {
+    auto var = var_t{jaxpr.new_var_id(), std::move(type)};
     jaxpr.invars.push_back(var);
     return {*this, std::move(var)};
 }
 
 void jaxpr_builder::register_output(const jaxpr_tracer& tracer) {
-    jaxpr.outvals.push_back(jax::value{tracer.get_var()});
+    jaxpr.outvals.push_back(value{tracer.get_var()});
 }
 
-void jaxpr_builder::register_output(const jax::value& value) {
+void jaxpr_builder::register_output(const value& value) {
     jaxpr.outvals.push_back(value);
 }
 
-void jaxpr_builder::register_output(const jax::array_t& array) {
-    jaxpr.outvals.push_back(jax::value{array});
+void jaxpr_builder::register_output(const array_t& array) {
+    jaxpr.outvals.push_back(value{array});
 }
 
-void jaxpr_builder::register_output(const jax::var_t& var) {
-    jaxpr.outvals.push_back(jax::value{var});
+void jaxpr_builder::register_output(const var_t& var) {
+    jaxpr.outvals.push_back(value{var});
 }
 
-jax::expression&& jaxpr_builder::get_jaxpr() {
+expression&& jaxpr_builder::get_jaxpr() {
     return std::move(jaxpr);
 }

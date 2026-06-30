@@ -85,12 +85,33 @@ inline std::ostream& emit_value_vector(std::ostream& stream,
     return stream;
 }
 
+inline std::ostream& emit_tuple(std::ostream& stream, const std::vector<size_t>& vec) {
+    stream << '(';
+    for (size_t i = 0; i < vec.size(); i++) {
+        stream << vec[i];
+        if (i != vec.size() - 1) stream << ", ";
+        else if (vec.size() == 1) stream << ',';
+    }
+    stream << ')';
+    return stream;
+}
+
 inline std::ostream& operator<<(std::ostream& stream, const jax::equation& eq) {
     for (auto& var: eq.get_output()) {
         emit_typed_var(stream, var) << ' ';
     }
 
-    stream << "= " << to_lower(jax::to_string(eq.get_op())) << ' ';
+    stream << "= " << to_lower(jax::to_string(eq.get_op()));
+    switch (eq.get_op()) {
+        case jax::primitive_op::TRANSPOSE: {
+            stream << "[permutation=";
+            emit_tuple(stream, std::get<jax::transpose_params>(eq.get_params()).permutation);
+            stream << ']';
+            break;
+        }
+        default:
+    }
+    stream << ' ';
     return emit_value_vector(stream, eq.get_input(), " ");
 }
 

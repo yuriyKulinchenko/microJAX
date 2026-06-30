@@ -16,17 +16,27 @@ int main() {
     using namespace jax;
     // Construct tracer:
     jaxpr_builder builder {};
-    jaxpr_tracer tracer_x = builder.register_tracer(type_enum::F32);
+    jaxpr_tracer tracer_x = builder.register_tracer(type_enum::F32, 10, 15, 20);
     // jaxpr_tracer tracer_y = builder.register_tracer(type_enum::F32);
 
-    auto output = jax::cos(jax::sin(tracer_x));
+    auto output = transpose(tracer_x, {2, 0, 1});
     builder.register_output(output);
 
     std::cout << "Original expression:\n";
     std::cout << builder.jaxpr;
 
-    std::cout << "Grad expression:\n";
-    std::cout << grad(grad(grad(builder.jaxpr)));
-
     return 0;
+
+    // jaxpr_builder builder {};
+    // jaxpr_tracer tracer_x = builder.register_tracer(type_enum::F32);
+    // // jaxpr_tracer tracer_y = builder.register_tracer(type_enum::F32);
+    //
+    // auto output = jax::cos(jax::sin(tracer_x));
+    // builder.register_output(output);
+    //
+    // std::cout << "Original expression:\n";
+    // std::cout << builder.jaxpr;
+    //
+    // std::cout << "Grad expression:\n";
+    // std::cout << grad(grad(grad(builder.jaxpr)));
 }
