@@ -20,7 +20,7 @@ jaxpr_tracer elementwise_binary_op(
         op
     );
 
-    return {builder, new_var};
+    return {builder, std::move(new_var)};
 }
 
 jaxpr_tracer unary_op(const value& val, primitive_op op, jaxpr_builder& builder) {
@@ -32,7 +32,7 @@ jaxpr_tracer unary_op(const value& val, primitive_op op, jaxpr_builder& builder)
         op
     );
 
-    return {builder, new_var};
+    return {builder, std::move(new_var)};
 }
 
 jaxpr_tracer unary_op(const value& val, type_t type, primitive_op op,
@@ -46,7 +46,7 @@ jaxpr_tracer unary_op(const value& val, type_t type, primitive_op op,
         params
     );
 
-    return {builder, new_var};
+    return {builder, std::move(new_var)};
 }
 
 
@@ -193,16 +193,121 @@ jaxpr_tracer jaxpr_tracer::broadcast_in_dim(std::vector<size_t> shape,
     type_t new_type {var.get_type().get_base_type(), shape};
     return unary_op(
         value{var}, std::move(new_type), primitive_op::BROADCAST_IN_DIM,
-        broadcast_in_dim_params{std::move(shape),
+        broadcast_in_dim_params{
+            std::move(shape),
             std::move(broadcast_dimensions)},
             builder);
 }
 
 jaxpr_tracer jaxpr_tracer::dot_general(
+    const jaxpr_tracer& other,
     std::vector<size_t> left_contract, std::vector<size_t> right_contract,
     std::vector<size_t> left_batch, std::vector<size_t> right_batch) const {
-    // TODO: implement this
-    return {builder, var};
+
+    const auto& this_shape = var.get_type().get_shape();
+    const auto& other_shape = other.get_type().get_shape();
+
+    // left and right lists have to match:
+
+    if (left_contract.size() != right_contract.size()) {
+        throw formatted_error(
+            "Error: the left and right contraction lists should have equal length,"
+            "Instead they have lengths {} and {} respectively",
+            left_contract.size(), right_contract.size());
+    }
+
+    if (left_batch.size() != right_batch.size()) {
+        throw formatted_error(
+            "Error: the left and right batch lists should have equal length,"
+            "Instead they have lengths {} and {} respectively",
+            left_contract.size(), right_contract.size());
+    }
+
+    for (size_t i = 0; i < left_contract.size(); i++) {
+        if (this_shape[left_contract[i]] != other_shape[right_contract[i]]) {
+            throw std::logic_error(
+                "Error: rank size mismatch in contraction indices"
+            );
+        }
+    }
+
+    for (size_t i = 0; i < left_contract.size(); i++) {
+        if (this_shape[left_batch[i]] != other_shape[right_batch[i]]) {
+            throw std::logic_error(
+                "Error: rank size mismatch in batch indices"
+            );
+        }
+    }
+
+    // contract and batch indices cannot overlap
+    // left_contract, left_batch have to be disjoint,
+    // right_contract, right batch have to be disjoint:
+
+    std::unordered_set<size_t> left_batch_set {left_batch.begin(), left_batch.end()};
+    for (size_t contract_index: left_contract) {
+        if (left_batch_set.contains(contract_index)) {
+            throw formatted_error(
+                "Error: left batch and left contract lists have shared index {}",
+                contract_index
+            );
+        }
+    }
+
+    std::unordered_set<size_t> right_batch_set {right_batch.begin(), right_batch.end()};
+    for (size_t contract_index: right_contract) {
+        if (right_batch_set.contains(contract_index)) {
+            throw formatted_error(
+                "Error: right batch and right contract lists have shared index {}",
+               contract_index
+            );
+        }
+    }
+
+    // Calculate the new shape, which will be of the form (batch, left free, right free):
+
+    size_t new_size =
+        this_shape.size() + other_shape.size() - left_batch.size() - 2 * left_contract.size();
+
+    std::vector<size_t> new_shape {};
+    new_shape.reserve(new_size);
+
+    // Add batch:
+
+    for (auto batch_dim: left_batch) {
+        new_shape.push_back(this_shape[batch_dim]);
+    }
+
+    // Add left free:
+
+    auto left_contract_complement = complement(left_contract, this_shape.size());
+    for (auto free_dim: left_contract_complement) {
+        if (!left_batch_set.contains(free_dim)) new_shape.push_back(this_shape[free_dim]);
+    }
+
+    // Add right free:
+
+    auto right_contract_complement = complement(right_contract, other_shape.size());
+    for (auto free_dim: right_contract_complement) {
+        if (!right_batch_set.contains(free_dim)) new_shape.push_back(other_shape[free_dim]);
+    }
+
+    type_t new_type {var.get_type().get_base_type(), new_shape};
+
+    var_t new_var {builder.jaxpr.new_var_id(), std::move(new_type)};
+
+    builder.jaxpr.equations.emplace_back(
+        std::vector{value{var}, value{other.var}},
+        std::vector{new_var},
+        primitive_op::DOT_GENERAL,
+        dot_general_params{
+            std::move(left_contract),
+            std::move(right_contract),
+            std::move(left_batch),
+            std::move(right_batch)
+        }
+    );
+
+    return {builder, std::move(new_var)};
 }
 
 jaxpr_tracer jaxpr_builder::register_tracer(type_t type) {

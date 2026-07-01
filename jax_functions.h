@@ -48,11 +48,19 @@ T reduce_sum(T x, std::vector<size_t> axes) {
 }
 
 template<typename T>
-T dot_general(T x,
+T dot_general(T x, T y,
     std::vector<size_t> left_contract, std::vector<size_t> right_contract,
     std::vector<size_t> left_batch, std::vector<size_t> right_batch) {
-    return x.dot_general(std::move(left_contract), std::move(right_contract),
+    return x.dot_general(y, std::move(left_contract), std::move(right_contract),
         std::move(left_batch), std::move(right_batch));
+}
+
+template<typename T>
+T dot_general(T x, T y,
+        std::pair<std::vector<size_t>, std::vector<size_t>> contract,
+        std::pair<std::vector<size_t>, std::vector<size_t>> batch) {
+    return x.dot_general(y, std::move(contract.first), std::move(contract.second),
+        std::move(batch.first), std::move(batch.second));
 }
 
 template<typename T>

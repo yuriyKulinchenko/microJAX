@@ -126,6 +126,20 @@ inline std::ostream& operator<<(std::ostream& stream, const jax::equation& eq) {
             stream << ']';
             break;
         }
+
+        case jax::primitive_op::DOT_GENERAL: {
+            const auto& params = std::get<jax::dot_general_params>(eq.get_params());
+            stream << "[dimension_numbers=(";
+            emit_tuple(stream, params.left_contract);
+            stream << ", ";
+            emit_tuple(stream, params.right_contract);
+            stream << "), (";
+            emit_tuple(stream, params.left_batch);
+            stream << ", ";
+            emit_tuple(stream, params.right_batch);
+            stream << ")]";
+            break;
+        }
         default:
     }
     stream << ' ';
