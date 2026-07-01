@@ -124,4 +124,39 @@ inline std::vector<size_t> complement(const std::vector<size_t>& vec1, const std
     return out_vec;
 }
 
+inline std::vector<size_t> permute(const std::vector<size_t>& vec, const std::vector<size_t>& permutation) {
+    std::vector<size_t> permuted(vec.size());
+    for (size_t i = 0; i < vec.size(); i++) {
+        permuted[i] = vec[permutation[i]];
+    }
+    return permuted;
+}
+
+inline std::vector<size_t> invert_permutation(const std::vector<size_t>& permutation) {
+    std::vector<size_t> inverse_permutation(permutation.size());
+    for (size_t i = 0; i < inverse_permutation.size(); i++) {
+        inverse_permutation[permutation[i]] = i;
+    }
+    return inverse_permutation;
+}
+
+inline bool valid_permutation(const std::vector<size_t>& permutation) {
+    // A permutation of N elements is valid if it is a permutation of the sequence (0, ..., N-1)
+    auto exists = std::vector(permutation.size(), false);
+    for (auto x: permutation) {
+        if (x >= permutation.size()) return false;
+        if (exists[x]) return false;
+        exists[x] = true;
+    }
+    return true;
+}
+
+inline bool is_identity_permutation(const std::vector<size_t>& permutation) {
+    // precondition: 'permutation' has to be a valid permutation
+    for (size_t i = 1; i < permutation.size(); i++) {
+        if (permutation[i] < permutation[i-1]) return false;
+    }
+    return true;
+}
+
 #endif //HELPER_H

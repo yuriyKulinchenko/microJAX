@@ -26,17 +26,6 @@ T cos(T x) {
     return x.cos();
 }
 
-inline bool valid_permutation(const std::vector<size_t>& permutation) {
-    // A permutation of N elements is valid if it is a permutation of the sequence (0, ..., N-1)
-    auto exists = std::vector(permutation.size(), false);
-    for (auto x: permutation) {
-        if (x >= permutation.size()) return false;
-        if (exists[x]) return false;
-        exists[x] = true;
-    }
-    return true;
-}
-
 template<typename T>
 T transpose(T x, std::vector<size_t> permutation) {
     return x.transpose(std::move(permutation));

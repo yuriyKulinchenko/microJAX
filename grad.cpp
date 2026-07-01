@@ -177,7 +177,7 @@ void grad_class::update_adjoint(
 }
 
 bool all_inputs_constant(const std::vector<value>& inputs) {
-    for (auto& input: inputs) if (input.is<jax::var_t>()) return false;
+    for (auto& input: inputs) if (input.is<var_t>()) return false;
     return true;
 }
 
@@ -200,7 +200,7 @@ void grad_class::propagate_adjoints(const equation& eq) {
             auto f_prime_var = fresh_var(output_var.get_type());
 
             output_expr.equations.emplace_back(
-                std::vector{jax::value{input_var}},
+                std::vector{value{input_var}},
                 std::vector{f_prime_var},
                 COS
             );
@@ -258,7 +258,7 @@ void grad_class::propagate_adjoints(const equation& eq) {
             auto& input_var = eq.get_input(0).get_var();
             auto f_prime = array_t::build_fill(output_var.get_type(), -1); // -1
 
-            update_adjoint(input_var, jax::value{f_prime}, *output_adj);
+            update_adjoint(input_var, value{f_prime}, *output_adj);
 
             break;
         }
@@ -461,6 +461,9 @@ void grad_class::propagate_adjoints(const equation& eq) {
 
             auto& x_val = eq.get_input(0);
             auto& y_val = eq.get_input(1);
+            auto& x_shape = x_val.get_type().get_shape();
+            auto& y_shape = y_val.get_type().get_shape();
+
             const auto& params = std::get<dot_general_params>(eq.get_params());
 
             // Let b = batch indices, c = contraction indices,
@@ -472,19 +475,17 @@ void grad_class::propagate_adjoints(const equation& eq) {
 
             auto free_indices_x = complement(
                 params.left_contract, params.left_batch,
-                y_val.get_type().get_shape().size()
+                x_shape.size()
             );
 
             auto free_indices_y = complement(
                 params.right_contract, params.right_batch,
-                x_val.get_type().get_shape().size()
+                y_shape.size()
             );
 
             // Goal 2: free indices need to be found in the product:
             // this should be a contiguous sequence at a reliable offset
             // (batch, x free, y free)
-
-            // TODO: re-ordering via permutation
 
             size_t x_offset = params.left_batch.size();
             size_t y_offset = x_offset + free_indices_x.size();
@@ -509,24 +510,71 @@ void grad_class::propagate_adjoints(const equation& eq) {
 
             auto batch_indices_y_product = batch_indices_x_product;
 
+            auto get_inverse_permutation = [](
+                const std::vector<size_t>& batch,
+                const std::vector<size_t>& contract,
+                const std::vector<size_t>& free
+                ) -> std::vector<size_t> {
+
+                const size_t contract_offset = batch.size();
+                const size_t free_offset = contract_offset + contract.size();
+                const size_t total_size = free_offset + free.size();
+
+                std::vector<size_t> inverse_permutation(total_size);
+
+                std::ranges::copy(batch, inverse_permutation.begin());
+                std::ranges::copy(contract, inverse_permutation.begin() + contract_offset);
+                std::ranges::copy(free, inverse_permutation.begin() + free_offset);
+                return inverse_permutation;
+            };
+
             if (x_val.is<var_t>()) {
-                auto dot_general_x = fresh_var(x_val.get_type());
+                auto& x_var = x_val.get_var();
+
+                std::vector<size_t> inverse_permutation =
+                    get_inverse_permutation(params.left_batch, params.left_contract, free_indices_x);
+
+                type_t new_type {x_var.get_type().get_base_type(), permute(x_shape, inverse_permutation)};
+
+                auto dot_general_x = fresh_var(std::move(new_type));
 
                 output_expr.equations.emplace_back(
                     std::vector{y_val, *output_adj},
                     std::vector{dot_general_x},
                     DOT_GENERAL,
                     dot_general_params{
-                        std::move(free_indices_y), std::move(free_indices_y_product),
+                        free_indices_y, std::move(free_indices_y_product),
                         std::move(batch_indices_y), std::move(batch_indices_y_product)
                     }
                 );
 
-                update_adjoint(x_val.get_var(), value{dot_general_x});
+                // Transpose may be necessary:
+
+                if (is_identity_permutation(inverse_permutation)) {
+                    update_adjoint(x_var, value{dot_general_x});
+                } else {
+                    auto transpose_dot_general_x = fresh_var(x_var.get_type());
+
+                    output_expr.equations.emplace_back(
+                        std::vector{value{dot_general_x}},
+                        std::vector{transpose_dot_general_x},
+                        TRANSPOSE,
+                        transpose_params{invert_permutation(inverse_permutation)}
+                    );
+
+                    update_adjoint(x_var, value{transpose_dot_general_x});
+                }
             }
 
             if (y_val.is<var_t>()) {
-                auto dot_general_y = fresh_var(y_val.get_type());
+                auto& y_var = y_val.get_var();
+
+                std::vector<size_t> inverse_permutation =
+                    get_inverse_permutation(params.right_batch, params.right_contract, free_indices_y);
+
+                type_t new_type {y_var.get_type().get_base_type(), permute(y_shape, inverse_permutation)};
+
+                auto dot_general_y = fresh_var(std::move(new_type));
 
                 output_expr.equations.emplace_back(
                     std::vector{x_val, *output_adj},
@@ -538,8 +586,47 @@ void grad_class::propagate_adjoints(const equation& eq) {
                     }
                 );
 
-                update_adjoint(y_val.get_var(), value{dot_general_y});
+
+                // Transpose may be necessary:
+
+                if (is_identity_permutation(inverse_permutation)) {
+                    update_adjoint(y_var, value{dot_general_y});
+                } else {
+                    auto transpose_dot_general_y = fresh_var(y_var.get_type());
+
+                    output_expr.equations.emplace_back(
+                        std::vector{value{dot_general_y}},
+                        std::vector{transpose_dot_general_y},
+                        TRANSPOSE,
+                        transpose_params{invert_permutation(inverse_permutation)}
+                    );
+
+                    update_adjoint(y_var, value{transpose_dot_general_y});
+                }
             }
+            break;
+        }
+
+        case TRANSPOSE: {
+            // invert the transpose:
+            auto& output_var = eq.get_output(0);
+            auto* output_adj = get_adjoint(output_var);
+            if (!output_adj) break;
+
+            auto& input_var = eq.get_input(0).get_var();
+            auto& params = std::get<transpose_params>(eq.get_params());
+
+            auto transposed_adjoint = fresh_var(input_var.get_type());
+
+            output_expr.equations.emplace_back(
+                std::vector{*output_adj},
+                std::vector{transposed_adjoint},
+                TRANSPOSE,
+                transpose_params {invert_permutation(params.permutation)}
+            );
+
+            update_adjoint(input_var, value{transposed_adjoint});
+
             break;
         }
 
