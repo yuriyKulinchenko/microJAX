@@ -1,5 +1,7 @@
 #include "jax_types.h"
 
+#include "DCE_class.h"
+
 namespace jax {
 
 std::string_view to_string(primitive_op op) {
@@ -223,6 +225,12 @@ void expression::add_equation(equation eq) {
 size_t expression::new_var_id() {
     return var_id++;
 }
+
+void expression::eliminate_dead_code() {
+    DCE_class instance {*this};
+    instance.apply_dead_code_elimination();
+}
+
 
 
 }

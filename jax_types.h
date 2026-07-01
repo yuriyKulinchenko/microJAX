@@ -393,6 +393,8 @@ struct expression {
     void add_output(value val);
     void add_equation(equation eq);
 
+    void eliminate_dead_code();
+
     size_t new_var_id();
 };
 

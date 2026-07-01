@@ -31,8 +31,13 @@ int main() {
     std::cout << "Original expression:\n";
     std::cout << jaxpr;
 
+    expression grad_jaxpr = grad(jaxpr);
     std::cout << "Grad expression:\n";
-    std::cout << grad(jaxpr);
+    std::cout << grad_jaxpr;
+
+    grad_jaxpr.eliminate_dead_code();
+    std::cout << "Grad expression (DCE):\n";
+    std::cout << grad_jaxpr;
 
     return 0;
 }

@@ -463,7 +463,7 @@ void grad_class::propagate_adjoints(const equation& eq) {
     }
 }
 
-expression grad_class::find_grad(value seed) {
+expression grad_class::find_grad(const value& seed) {
     if (input_expr.outvals.size() != 1) {
         throw formatted_error("Error: expected 1 output, received {}", input_expr.outvals.size());
     }

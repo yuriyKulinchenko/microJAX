@@ -9,7 +9,7 @@ class grad_class {
     friend jax::expression grad(const jax::expression& expr);
     grad_class(const jax::expression& expr);
 
-    jax::expression find_grad(jax::value seed);
+    jax::expression find_grad(const jax::value& seed);
     void introduce_adjoint(const jax::var_t& var);
     jax::value* get_adjoint(const jax::var_t& var);
 
