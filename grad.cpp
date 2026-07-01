@@ -331,11 +331,7 @@ void grad_class::propagate_adjoints(const equation& eq) {
             const auto& input_shape = input_var.get_type().get_shape();
             const auto& axes = std::get<reduce_sum_params>(eq.get_params()).axes;
 
-            std::vector<size_t> axes_complement(input_shape.size() - axes.size());
-            for (size_t i = 0, j = 0, k = 0; i < input_shape.size(); i++) {
-                if (k < axes.size() && axes[k] == i) { k++; continue; }
-                axes_complement[j++] = i;
-            }
+            std::vector<size_t> axes_complement = complement(axes, input_shape.size());
 
             auto broadcast_adjoint = fresh_var(input_var.get_type());
 
@@ -353,11 +349,7 @@ void grad_class::propagate_adjoints(const equation& eq) {
 
         case BROADCAST_IN_DIM: {
 
-            // TODO: implement handling of stretching
-
             /*
-            Notes for tomorrow:
-
             Suppose you perform a broadcast (5,1,3) -> (5,10,9,15,3),
             where 10 and 15 are newly inserted, and 1 is stretched to 9.
 
@@ -387,22 +379,77 @@ void grad_class::propagate_adjoints(const equation& eq) {
             const auto& output_shape = params.shape;
             const auto& broadcast_dims = params.broadcast_dimensions;
 
-            std::vector<size_t> broadcast_dims_complement(output_shape.size() - broadcast_dims.size());
-            for (size_t i = 0, j = 0, k = 0; i < output_shape.size(); i++) {
-                if (k < broadcast_dims.size() && broadcast_dims[k] == i) { k++; continue; }
-                broadcast_dims_complement[j++] = i;
+            std::vector<size_t> axes = complement(broadcast_dims, output_shape.size());
+
+            // Add handling of stretching:
+
+            size_t old_axes_size = axes.size();
+
+            const auto& input_shape = input_var.get_type().get_shape();
+            for (size_t i = 0; i < input_shape.size(); i++) {
+                if (input_shape[i] == 1) {
+                    size_t j = params.broadcast_dimensions[i];
+                    if (output_shape[j] != 1) {
+                        // A 1 has been stretched to output_shape[j]:
+                        axes.push_back(j);
+                    }
+                }
             }
 
-            auto summed_adjoint = fresh_var(input_var.get_type());
+            std::ranges::inplace_merge(axes.begin(), axes.begin() + old_axes_size, axes.end());
 
-            output_expr.equations.emplace_back(
-                std::vector{*output_adj},
-                std::vector{summed_adjoint},
-                REDUCE_SUM,
-                reduce_sum_params{std::move(broadcast_dims_complement)}
-            );
+            // If any stretching occured, an additional broadcast must also happen:
 
-            update_adjoint(input_var, value{summed_adjoint});
+            if (old_axes_size != axes.size()) {
+                // The new type shape is the complement of axes:
+
+                std::vector<size_t> summed_shape = complement(axes, output_shape.size());
+                for (auto& x: summed_shape) {
+                    x = output_shape[x];
+                }
+
+                auto summed_type = type_t{input_var.get_type().get_base_type(), std::move(summed_shape)};
+
+                auto summed_adjoint = fresh_var(std::move(summed_type));
+
+                output_expr.equations.emplace_back(
+                    std::vector{*output_adj},
+                    std::vector{summed_adjoint},
+                    REDUCE_SUM,
+                    reduce_sum_params{std::move(axes)}
+                );
+
+                // Now, a re-broadcast has to happen:
+
+                std::vector<size_t> broadcast_dimensions {};
+
+                for (size_t i = 0; i < input_shape.size(); i++) {
+                    bool was_stretched = (input_shape[i] == 1 && output_shape[broadcast_dims[i]] != 1);
+                    if (!was_stretched) broadcast_dimensions.push_back(i);
+                }
+
+                auto broadcast_adjoint = fresh_var(input_var.get_type());
+
+                output_expr.equations.emplace_back(
+                    std::vector{value{summed_adjoint}},
+                    std::vector{broadcast_adjoint},
+                    BROADCAST_IN_DIM,
+                    broadcast_in_dim_params{input_shape, broadcast_dimensions}
+                );
+
+                update_adjoint(input_var, value{broadcast_adjoint});
+            } else {
+                auto summed_adjoint = fresh_var(input_var.get_type());
+
+                output_expr.equations.emplace_back(
+                    std::vector{*output_adj},
+                    std::vector{summed_adjoint},
+                    REDUCE_SUM,
+                    reduce_sum_params{std::move(axes)}
+                );
+
+                update_adjoint(input_var, value{summed_adjoint});
+            }
             break;
         }
 

@@ -82,4 +82,22 @@ inline void print_red(const std::string& s) {
 template <typename F, typename R, typename... Args>
 concept invocable_r = std::is_invocable_r_v<R, F, Args...>;
 
+inline std::vector<size_t> complement(const std::vector<size_t>& vec, const size_t n) {
+    // Given that vec is a subsequence of (0, ..., n-1),
+    // complement(vec, n) is the complement of that subsequence
+
+    std::vector<size_t> out_vec {};
+    out_vec.reserve(n - vec.size());
+
+    for (size_t i = 0, j = 0; i < n; i++) {
+        if (j < vec.size() && vec[j] == i) {
+            j++;
+            continue;
+        }
+        out_vec.push_back(i);
+    }
+
+    return out_vec;
+}
+
 #endif //HELPER_H
