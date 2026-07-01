@@ -20,8 +20,11 @@ int main() {
     auto tracer_x = builder.register_tracer(type_enum::F32, 5, 10, 15);
     auto tracer_y = builder.register_tracer(type_enum::F32, 5, 8, 10);
 
-    auto output =
+    auto product =
         dot_general(tracer_x, tracer_y, {{1}, {2}}, {{0}, {0}});
+
+    // product: (5, 15, 8) -> sum all axes -> scalar
+    auto output = reduce_sum(product, {0, 1, 2});
 
     builder.register_output(output);
     expression jaxpr = builder.get_jaxpr();
@@ -29,25 +32,8 @@ int main() {
     std::cout << "Original expression:\n";
     std::cout << jaxpr;
 
+    std::cout << "Grad expression:\n";
+    std::cout << grad(jaxpr);
+
     return 0;
-
-
-    // jaxpr_tracer tracer_x = builder.register_tracer(type_enum::F32, 5, 1, 3);
-    //
-    // auto broadcasted = broadcast_in_dim(tracer_x, {5, 10, 9, 15, 3}, {0, 2, 4});
-    // auto output = reduce_sum(broadcasted, {0, 1, 2, 3, 4});
-    //
-    // builder.register_output(output);
-    // expression jaxpr = builder.get_jaxpr();
-    //
-    // std::cout << "Original expression:\n";
-    // std::cout << jaxpr;
-    //
-    // expression grad_jaxpr = grad(jaxpr);
-    // std::cout << "Grad expression:\n";
-    // std::cout << grad_jaxpr;
-    //
-    // grad_jaxpr.eliminate_dead_code();
-    // std::cout << "Grad expression (DCE):\n";
-    // std::cout << grad_jaxpr;
 }

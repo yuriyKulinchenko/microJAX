@@ -100,4 +100,28 @@ inline std::vector<size_t> complement(const std::vector<size_t>& vec, const size
     return out_vec;
 }
 
+inline std::vector<size_t> complement(const std::vector<size_t>& vec1, const std::vector<size_t>& vec2, const size_t n) {
+    // Given that vec1, vec2 are disjoint subsequences of (0, ..., n-1),
+    // complement(vec1, vec2, n) is the complement of both subsequences
+
+    std::vector<size_t> out_vec {};
+    out_vec.reserve(n - vec1.size() - vec2.size());
+
+    for (size_t i = 0, j1 = 0, j2 = 0; i < n; i++) {
+        if (j1 < vec1.size() && vec1[j1] == i) {
+            j1++;
+            continue;
+        }
+
+        if (j2 < vec2.size() && vec2[j2] == i) {
+            j2++;
+            continue;
+        }
+
+        out_vec.push_back(i);
+    }
+
+    return out_vec;
+}
+
 #endif //HELPER_H

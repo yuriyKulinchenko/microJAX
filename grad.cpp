@@ -455,6 +455,92 @@ void grad_class::propagate_adjoints(const equation& eq) {
 
         case DOT_GENERAL: {
 
+            auto& output_var = eq.get_output(0);
+            auto* output_adj = get_adjoint(output_var);
+            if (!output_adj) break;
+
+            auto& x_val = eq.get_input(0);
+            auto& y_val = eq.get_input(1);
+            const auto& params = std::get<dot_general_params>(eq.get_params());
+
+            // Let b = batch indices, c = contraction indices,
+            // f^(X) = free indices of X, f^(Y) = free indices of Y
+            // Adjoint X is a contraction over f^(Y), and vice versa
+
+
+            // Goal 1: free indices need to be found in X and Y
+
+            auto free_indices_x = complement(
+                params.left_contract, params.left_batch,
+                y_val.get_type().get_shape().size()
+            );
+
+            auto free_indices_y = complement(
+                params.right_contract, params.right_batch,
+                x_val.get_type().get_shape().size()
+            );
+
+            // Goal 2: free indices need to be found in the product:
+            // this should be a contiguous sequence at a reliable offset
+            // (batch, x free, y free)
+
+            // TODO: re-ordering via permutation
+
+            size_t x_offset = params.left_batch.size();
+            size_t y_offset = x_offset + free_indices_x.size();
+
+            std::vector<size_t> free_indices_x_product(free_indices_x.size());
+            for (size_t i = 0; i < free_indices_x.size(); i++) {
+                free_indices_x_product[i] = x_offset + i;
+            }
+
+            std::vector<size_t> free_indices_y_product(free_indices_y.size());
+            for (size_t i = 0; i < free_indices_y.size(); i++) {
+                free_indices_y_product[i] = y_offset + i;
+            }
+
+            auto batch_indices_x = params.left_batch;
+            auto batch_indices_y = params.right_batch;
+
+            std::vector<size_t> batch_indices_x_product(batch_indices_x.size());
+            for (size_t i = 0; i < batch_indices_x.size(); i++) {
+                batch_indices_x_product[i] = i;
+            }
+
+            auto batch_indices_y_product = batch_indices_x_product;
+
+            if (x_val.is<var_t>()) {
+                auto dot_general_x = fresh_var(x_val.get_type());
+
+                output_expr.equations.emplace_back(
+                    std::vector{y_val, *output_adj},
+                    std::vector{dot_general_x},
+                    DOT_GENERAL,
+                    dot_general_params{
+                        std::move(free_indices_y), std::move(free_indices_y_product),
+                        std::move(batch_indices_y), std::move(batch_indices_y_product)
+                    }
+                );
+
+                update_adjoint(x_val.get_var(), value{dot_general_x});
+            }
+
+            if (y_val.is<var_t>()) {
+                auto dot_general_y = fresh_var(y_val.get_type());
+
+                output_expr.equations.emplace_back(
+                    std::vector{x_val, *output_adj},
+                    std::vector{dot_general_y},
+                    DOT_GENERAL,
+                    dot_general_params{
+                        std::move(free_indices_x), std::move(free_indices_x_product),
+                        std::move(batch_indices_x), std::move(batch_indices_x_product)
+                    }
+                );
+
+                update_adjoint(y_val.get_var(), value{dot_general_y});
+            }
+            break;
         }
 
         default: {
