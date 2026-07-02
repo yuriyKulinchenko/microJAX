@@ -7,6 +7,7 @@
 
 class grad_class {
     friend jax::expression grad(const jax::expression& expr);
+    friend jax::expression grad_general(const jax::expression& expr);
     grad_class(const jax::expression& expr);
 
     jax::expression find_grad();
@@ -29,7 +30,7 @@ class grad_class {
 
     */
 
-    jax::expression grad_general();
+    jax::expression find_grad_general();
 
     void introduce_adjoint(const jax::var_t& var);
     jax::value* get_adjoint(const jax::var_t& var);
@@ -56,6 +57,7 @@ class grad_class {
 };
 
 jax::expression grad(const jax::expression& expr);
+jax::expression grad_general(const jax::expression& expr);
 
 
 #endif //GRAD_H

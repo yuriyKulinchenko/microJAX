@@ -22,15 +22,15 @@ int main() {
     auto x = builder.register_tracer(type_enum::F32, 10);
     builder.register_output(reduce_sum(softmax(x), {0}));
 
-    expression jaxpr = builder.get_jaxpr();
+    auto jaxpr = builder.get_jaxpr();
     std::cout << "Original expression:\n" << jaxpr;
 
 
-    expression grad_jaxpr = grad(jaxpr);
+    auto grad_jaxpr = grad(jaxpr);
     std::cout << "Grad expression:\n" << grad_jaxpr;
 
-    grad_jaxpr.eliminate_dead_code();
-    std::cout << "Grad expression (DCE):\n" << grad_jaxpr;
+    auto grad_general_jaxpr = grad_general(jaxpr);
+    std::cout << "Grad general expression:\n" << grad_general_jaxpr;
 
     return 0;
 }

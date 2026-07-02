@@ -32,9 +32,13 @@ amenable to this extension.
 using namespace jax;
 
 expression grad(const expression& expr) {
-    // For now, take the seed to be f32:
     auto instance = grad_class{expr};
     return instance.find_grad();
+}
+
+expression grad_general(const expression& expr) {
+    auto instance = grad_class{expr};
+    return instance.find_grad_general();
 }
 
 grad_class::grad_class(const expression& expr): input_expr(expr) {
@@ -727,7 +731,7 @@ expression grad_class::find_grad() {
 
     // Seed the adjoint of the initial equation:
 
-    update_adjoint(output_var, value{array_t{type_t{type_enum::F32}, std::vector{1}}});
+    update_adjoint(output_var, value{array_t::build_fill(type_t{type_enum::F32}, 1)});
 
     // perform a backward pass:
 
@@ -750,7 +754,7 @@ expression grad_class::find_grad() {
     return output_expr;
 }
 
-expression grad_class::grad_general() {
+expression grad_class::find_grad_general() {
     // Add inputs (x0, ..., xn)
 
     for (auto& var: input_expr.invars) {
