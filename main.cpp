@@ -8,8 +8,10 @@
 
 
 template<typename T>
-T test_function(T x, T y) {
-    return jax::sin(x) + jax::cos(x) * jax::cos(y) + 1;
+T softmax(T vec) {
+    auto exp_vec = jax::exp(vec);
+    auto sum = jax::reduce_sum(exp_vec, {0});
+    return exp_vec / sum;
 }
 
 int main() {
@@ -17,19 +19,10 @@ int main() {
     // Construct tracer:
     jaxpr_builder builder {};
 
-    auto x = builder.register_tracer(type_enum::F32, 15, 10, 5);
-    auto y = builder.register_tracer(type_enum::F32, 5, 8, 10);
+    auto x = builder.register_tracer(type_enum::F32, 10);
+    builder.register_output(reduce_sum(softmax(x), {0}));
 
-    auto x_transpose = transpose(x, {2, 1, 0});
-
-    auto product =
-        dot_general(x_transpose, y, {{1}, {2}}, {{0}, {0}});
-
-    auto output = reduce_sum(product, {0, 1, 2});
-
-    builder.register_output(output);
     expression jaxpr = builder.get_jaxpr();
-
     std::cout << "Original expression:\n" << jaxpr;
 
 

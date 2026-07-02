@@ -32,6 +32,9 @@ public:
     friend jaxpr_tracer operator*(const jaxpr_tracer&, const jaxpr_tracer&);
     friend jaxpr_tracer operator*(const jaxpr_tracer&, const jax::array_t&);
     friend jaxpr_tracer operator*(const jax::array_t&, const jaxpr_tracer&);
+    friend jaxpr_tracer operator/(const jaxpr_tracer&, const jaxpr_tracer&);
+    friend jaxpr_tracer operator/(const jaxpr_tracer&, const jax::array_t&);
+    friend jaxpr_tracer operator/(const jax::array_t&, const jaxpr_tracer&);
 
     [[nodiscard]] jaxpr_tracer sin() const;
     [[nodiscard]] jaxpr_tracer cos() const;

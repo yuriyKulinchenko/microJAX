@@ -112,6 +112,7 @@ array_t array_t::operator op (const array_t& other) const {                 \
 BINARY_OP_OTHER(+, +=);
 BINARY_OP_OTHER(-, -=);
 BINARY_OP_OTHER(*, *=);
+BINARY_OP_OTHER(/, /=);
 
 const type_t& array_t::get_type() const {
     return type;
@@ -229,6 +230,76 @@ size_t expression::new_var_id() {
 void expression::eliminate_dead_code() {
     DCE_class instance {*this};
     instance.apply_dead_code_elimination();
+}
+
+std::vector<size_t> get_implicit_broadcast_shape(const std::vector<size_t>& left_shape,
+    const std::vector<size_t>& right_shape) {
+
+    // Normalise so that left_shape.size() < right_shape.size():
+    if (right_shape.size() < left_shape.size())
+        return get_implicit_broadcast_shape(right_shape, left_shape);
+
+    size_t new_size = right_shape.size();
+    std::vector<size_t> new_shape(new_size);
+
+    // For all places where the 1s prefix would have existed, populate with right_shape:
+
+    size_t delta = right_shape.size() - left_shape.size();
+    for (size_t i = 0; i < delta; i++) {
+        new_shape[i] = right_shape[i];
+    }
+
+    // For all places where there is a shared prefix,
+    // Ensure that one of them is 1, and take the max:
+
+    for (size_t i = 0; i < left_shape.size(); i++) {
+        if (left_shape[i] == 1) {
+            new_shape[delta + i] = right_shape[i];
+        } else if (right_shape[delta + i] == 1) {
+            new_shape[delta + i] = left_shape[delta + i];
+        } else {
+            std::cerr << left_shape << '\n';
+            std::cerr << right_shape << '\n';
+            throw std::logic_error("Error: shape mismatch in implicit broadcast");
+        }
+    }
+
+    return new_shape;
+}
+
+implicit_broadcast_result get_implicit_broadcast_result(const std::vector<size_t>& left_shape,
+    const std::vector<size_t>& right_shape) {
+    std::vector<size_t> new_shape = get_implicit_broadcast_shape(left_shape, right_shape);
+
+    std::vector<size_t> broadcast_dimensions(new_shape.size());
+    for (size_t i = 0; i < new_shape.size(); i++) {
+        broadcast_dimensions[i] = i;
+    }
+
+    // From the new_shape, infer the broadcast dimensions:
+    if (left_shape.size() < right_shape.size()) {
+        size_t delta = right_shape.size() - left_shape.size();
+        std::vector<size_t> left_broadcast_dimensions(left_shape.size());
+        for (size_t i = 0; i < left_shape.size(); i++) {
+            left_broadcast_dimensions[i] = i + delta;
+        }
+        return {
+            std::move(new_shape),
+            std::move(left_broadcast_dimensions),
+            std::move(broadcast_dimensions)
+        };
+    }
+
+    size_t delta = left_shape.size() - right_shape.size();
+    std::vector<size_t> right_broadcast_dimensions(right_shape.size());
+    for (size_t i = 0; i < right_shape.size(); i++) {
+        right_broadcast_dimensions[i] = i + delta;
+    }
+    return {
+        std::move(new_shape),
+        std::move(broadcast_dimensions),
+        std::move(right_broadcast_dimensions)
+    };
 }
 
 

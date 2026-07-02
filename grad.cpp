@@ -310,6 +310,64 @@ void grad_class::propagate_adjoints(const equation& eq) {
             break;
         }
 
+        case DIV: {
+            // z = x / y
+            // x' += dL/dz dz/dx
+            // dz/dx = 1 / y => x' += z' / y
+            // y' += dL/dz dz/dy
+            // dz/dy = - x / (y * y) => y' += z' * neg(z/y)
+
+            auto& output_var = eq.get_output(0);
+            auto* output_adj = get_adjoint(output_var);
+            if (!output_adj) break;
+
+            auto& x_val = eq.get_input(0);
+            auto& y_val = eq.get_input(1);
+
+            if (x_val.is<var_t>()) {
+                if (y_val.is<array_t>() && y_val.get_array().has_single_value(1)) {
+
+                    // If y_val is a 1 vector, the division can be omitted
+
+                    update_adjoint(x_val.get_var(), *output_adj);
+                } else {
+                    auto quotient_val = fresh_var(x_val.get_type());
+
+                    output_expr.equations.emplace_back(
+                        std::vector{*output_adj, y_val},
+                        std::vector{quotient_val},
+                        DIV
+                    );
+
+                    update_adjoint(x_val.get_var(), value{quotient_val});
+                }
+            }
+
+            // dz/dy = - x / (y * y) => y' += z' * neg(z/y)
+
+            if (y_val.is<var_t>()) {
+                auto quotient_val = fresh_var(y_val.get_type());
+
+                output_expr.equations.emplace_back(
+                    std::vector{value{output_var}, y_val},
+                    std::vector{quotient_val},
+                    DIV
+                );
+
+                auto negated_quotient_val = fresh_var(y_val.get_type());
+
+                output_expr.equations.emplace_back(
+                    std::vector{value{quotient_val}},
+                    std::vector{negated_quotient_val},
+                    NEG
+                );
+
+                update_adjoint(y_val.get_var(), value{negated_quotient_val});
+            }
+
+            break;
+        }
+
         case REDUCE_SUM: {
             auto& output_var = eq.get_output(0);
             auto* output_adj = get_adjoint(output_var);

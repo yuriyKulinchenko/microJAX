@@ -26,6 +26,16 @@ T cos(T x) {
     return x.cos();
 }
 
+template<typename T> requires(std::is_scalar_v<T>)
+T exp(T x) {
+    return std::exp(x);
+}
+
+template<typename T> requires(!std::is_scalar_v<T>)
+T exp(T x) {
+    return x.exp();
+}
+
 template<typename T>
 T transpose(T x, std::vector<size_t> permutation) {
     return x.transpose(std::move(permutation));

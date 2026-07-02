@@ -18,9 +18,9 @@ using f64 = double;
 namespace jax {
 
 #define PRIMITIVE_OP_LIST(X)                    \
-    X(ADD) X(SUB) X(MUL) X(SIN)                 \
-    X(COS) X(EXP) X(LOG) X(NEG)                 \
-    X(TRANSPOSE) X(REDUCE_SUM)                  \
+    X(ADD) X(SUB) X(MUL) X(DIV)                 \
+    X(SIN) X(COS) X(EXP) X(LOG)                 \
+    X(NEG) X(TRANSPOSE) X(REDUCE_SUM)           \
     X(DOT_GENERAL) X(BROADCAST_IN_DIM)
 
 #define TYPE_ENUM_LIST(X) \
@@ -214,6 +214,7 @@ public:
     array_t operator+(const array_t& other) const;
     array_t operator-(const array_t& other) const;
     array_t operator*(const array_t& other) const;
+    array_t operator/(const array_t& other) const;
 
     [[nodiscard]] const type_t& get_type() const;
     [[nodiscard]] const vector_variant& get_value() const;
@@ -328,6 +329,15 @@ public:
 private:
    std::variant<array_t, var_t> variant_;
 };
+
+struct implicit_broadcast_result {
+    std::vector<size_t> new_shape;
+    std::vector<size_t> left_broadcast_dimensions;
+    std::vector<size_t> right_broadcast_dimensions;
+};
+
+implicit_broadcast_result get_implicit_broadcast_result(const std::vector<size_t>& left_shape,
+    const std::vector<size_t>& right_shape);
 
 
 // An equation will look something like:

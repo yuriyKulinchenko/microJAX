@@ -68,7 +68,8 @@ void DCE_class::apply_dead_code_elimination() {
     size_t place_index = 0;
     for (size_t i = 0; i < equations.size(); i++) {
         if (!keep[i]) continue;
-        equations[place_index++] = std::move(equations[i]);
+        if (place_index != i) equations[place_index] = std::move(equations[i]);
+        place_index++;
     }
 
     // Shrink the vector appropriately:

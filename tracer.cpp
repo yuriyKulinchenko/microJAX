@@ -12,15 +12,88 @@ jaxpr_tracer elementwise_binary_op(
     primitive_op op,
     jaxpr_builder& builder
     ) {
-    var_t new_var {builder.jaxpr.new_var_id(), v1.get_type()};
+    const std::vector<size_t>& left_shape = v1.get_type().get_shape();
+    const std::vector<size_t>& right_shape = v2.get_type().get_shape();
+
+    if (left_shape != right_shape) {
+        // A reshape must occur:
+        auto result = get_implicit_broadcast_result(left_shape, right_shape);
+        type_t new_type{v1.get_type().get_base_type(), result.new_shape};
+
+        var_t result_var {builder.jaxpr.new_var_id(), new_type};
+
+        auto get_left_broadcast_var = [&]() -> var_t {
+            var_t v1_broadcast {builder.jaxpr.new_var_id(), new_type};
+
+            builder.jaxpr.equations.emplace_back(
+                std::vector{v1},
+                std::vector{v1_broadcast},
+                primitive_op::BROADCAST_IN_DIM,
+                broadcast_in_dim_params{std::move(result.new_shape),
+                    std::move(result.left_broadcast_dimensions)}
+            );
+
+            return v1_broadcast;
+        };
+
+        auto get_right_broadcast_var = [&]() -> var_t {
+            var_t v2_broadcast {builder.jaxpr.new_var_id(), new_type};
+
+            builder.jaxpr.equations.emplace_back(
+                std::vector{v2},
+                std::vector{v2_broadcast},
+                primitive_op::BROADCAST_IN_DIM,
+                broadcast_in_dim_params{std::move(result.new_shape),
+                    std::move(result.right_broadcast_dimensions)}
+            );
+
+            return v2_broadcast;
+        };
+
+        if (left_shape == result.new_shape) {
+            // The left shape has not changed, but the right shape has:
+            var_t v2_broadcast = get_right_broadcast_var();
+
+            builder.jaxpr.equations.emplace_back(
+                std::vector{v1, value{std::move(v2_broadcast)}},
+                std::vector{result_var},
+                op
+            );
+
+        } else if (right_shape == result.new_shape) {
+            var_t v1_broadcast = get_left_broadcast_var();
+            // The right shape has not changed, but the left shape has:
+            builder.jaxpr.equations.emplace_back(
+                std::vector{value{std::move(v1_broadcast)}, v2},
+                std::vector{result_var},
+                op
+            );
+
+        } else {
+            // Both have changed:
+
+            var_t v1_broadcast = get_left_broadcast_var();
+            var_t v2_broadcast = get_right_broadcast_var();
+
+            builder.jaxpr.equations.emplace_back(
+                std::vector{value{std::move(v1_broadcast)}, value{std::move(v2_broadcast)}},
+                std::vector{result_var},
+                op
+            );
+        }
+
+        return {builder, std::move(result_var)};
+    }
+
+    var_t result_var {builder.jaxpr.new_var_id(), v1.get_type()};
 
     builder.jaxpr.equations.emplace_back(
         std::vector{v1, v2},
-        std::vector{new_var},
+        std::vector{result_var},
         op
     );
 
-    return {builder, std::move(new_var)};
+    return {builder, std::move(result_var)};
 }
 
 jaxpr_tracer unary_op(const value& val, primitive_op op, jaxpr_builder& builder) {
@@ -51,7 +124,7 @@ jaxpr_tracer unary_op(const value& val, type_t type, primitive_op op,
 
 
 #define DIMENSIONALITY_ERROR(v1, v2)                                                                \
-if(v1.get_type() != v2.get_type()) {                                                                \
+if(v1.get_type().get_base_type() != v2.get_type().get_base_type()) {                                \
     throw std::logic_error("ERROR: dimensionality mismatch when attempting elementwise operation"); \
 }                                                                                                   \
 
@@ -82,6 +155,7 @@ ELEMENTWISE_BINARY_OP_ARRAY_TRACER(op, op_name)     \
 ELEMENTWISE_BINARY_OP(+, jax::primitive_op::ADD);
 ELEMENTWISE_BINARY_OP(*, jax::primitive_op::MUL);
 ELEMENTWISE_BINARY_OP(-, jax::primitive_op::SUB);
+ELEMENTWISE_BINARY_OP(/, jax::primitive_op::DIV);
 
 jaxpr_tracer jaxpr_tracer::sin() const {
     return unary_op(value{var}, primitive_op::SIN, builder);
