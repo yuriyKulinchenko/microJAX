@@ -9,7 +9,28 @@ class grad_class {
     friend jax::expression grad(const jax::expression& expr);
     grad_class(const jax::expression& expr);
 
-    jax::expression find_grad(const jax::value& seed);
+    jax::expression find_grad();
+
+
+    /*
+    grad_general is the generalisable form of find_grad,
+    which is able to handle multi-input, multi-output expressions
+    and transform them into expressions which back-propagate adjoints
+    given the output adjoints and input parameters.
+
+    Unlike find_grad, grad_general does not bake the seed into the
+    final expression. Instead, it takes it as an explicit parameter.
+
+    For an expression mapping:
+    (x0, ..., xn) -> (y0, ..., ym),
+
+    grad_general will return a new expression mapping:
+    (x0, ..., xn, y'0, ..., y'm) -> (x'0, ..., x'n)
+
+    */
+
+    jax::expression grad_general();
+
     void introduce_adjoint(const jax::var_t& var);
     jax::value* get_adjoint(const jax::var_t& var);
 

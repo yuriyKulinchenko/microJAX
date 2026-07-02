@@ -34,7 +34,7 @@ using namespace jax;
 expression grad(const expression& expr) {
     // For now, take the seed to be f32:
     auto instance = grad_class{expr};
-    return instance.find_grad(value{array_t::build_fill(type_t{type_enum::F32}, 1)});
+    return instance.find_grad();
 }
 
 grad_class::grad_class(const expression& expr): input_expr(expr) {
@@ -694,7 +694,7 @@ void grad_class::propagate_adjoints(const equation& eq) {
     }
 }
 
-expression grad_class::find_grad(const value& seed) {
+expression grad_class::find_grad() {
     if (input_expr.outvals.size() != 1) {
         throw formatted_error("Error: expected 1 output, received {}", input_expr.outvals.size());
     }
@@ -727,7 +727,7 @@ expression grad_class::find_grad(const value& seed) {
 
     // Seed the adjoint of the initial equation:
 
-    update_adjoint(output_var, seed);
+    update_adjoint(output_var, value{array_t{type_t{type_enum::F32}, std::vector{1}}});
 
     // perform a backward pass:
 
@@ -749,5 +749,57 @@ expression grad_class::find_grad(const value& seed) {
 
     return output_expr;
 }
+
+expression grad_class::grad_general() {
+    // Add inputs (x0, ..., xn)
+
+    for (auto& var: input_expr.invars) {
+        output_expr.add_input(var);
+        introduce_adjoint(var);
+    }
+
+    // perform a forward pass:
+
+    for (auto& eq: input_expr.equations) {
+        output_expr.add_equation(eq);
+        for (auto& var: eq.get_output()) {
+            introduce_adjoint(var);
+        }
+    }
+
+    // Add output adjoints (y'0, ..., y'm) and
+    // Seed the adjoints of the initial equation:
+
+    for (auto& output_val: input_expr.outvals) {
+        var_t y_bar_param = fresh_var(output_val.get_type());
+        output_expr.add_input(y_bar_param);
+
+        if (output_val.is<array_t>()) continue;
+
+        auto& output_var = output_val.get_var();
+        update_adjoint(output_var, value{y_bar_param});
+    }
+
+    // perform a backward pass:
+
+    for (auto& eq: input_expr.equations | std::views::reverse) {
+        propagate_adjoints(eq);
+    }
+
+    // Populate outputs:
+
+    for (auto& var: input_expr.invars) {
+        if (value* val = get_adjoint(var)) {
+            // The adjoint exists:
+            output_expr.outvals.push_back(*val);
+        } else {
+            // The adjoint does not exist - replace it with 0:
+            output_expr.outvals.push_back(value{array_t::build_fill(var.get_type(), 0)});
+        }
+    }
+
+    return output_expr;
+}
+
 
 
