@@ -28,10 +28,8 @@ int main() {
     auto jaxpr = builder.get_jaxpr();
     std::cout << "Original expression:\n" << jaxpr;
 
-    return 0;
-
-    auto grad_jaxpr = grad(jaxpr);
-    std::cout << "Grad expression:\n" << grad_jaxpr;
+    // auto grad_jaxpr = grad(jaxpr);
+    // std::cout << "Grad expression:\n" << grad_jaxpr;
 
     auto grad_general_jaxpr = grad_general(jaxpr);
     std::cout << "Grad general expression:\n" << grad_general_jaxpr;

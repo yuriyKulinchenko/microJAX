@@ -84,6 +84,8 @@ public:
     void set_id(size_t new_id);
 
     [[nodiscard]] const type_t& get_type() const;
+    [[nodiscard]] const std::vector<size_t>& get_shape() const;
+    [[nodiscard]] dtype_t get_dtype() const;
 
 private:
     type_t type;

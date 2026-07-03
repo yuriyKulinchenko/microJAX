@@ -692,6 +692,32 @@ void grad_class::propagate_adjoints(const equation& eq) {
             break;
         }
 
+        case CONVERT_ELEMENT_TYPE: {
+            auto& output_var = eq.get_output(0);
+            auto* output_adj = get_adjoint(output_var);
+            if (!output_adj) break;
+
+            auto& input_var = eq.get_input(0).get_var();
+
+            if (is_integral(input_var.get_dtype()) || is_integral(output_var.get_dtype())) {
+                break;
+            }
+
+            // Cast the output adjoint to the type of the input:
+
+            auto converted_adjoint = fresh_var(input_var.get_type());
+
+            output_expr.equations.emplace_back(
+                std::vector{*output_adj},
+                std::vector{converted_adjoint},
+                CONVERT_ELEMENT_TYPE,
+                convert_element_type_params{input_var.get_dtype()}
+            );
+
+            update_adjoint(input_var, value{converted_adjoint});
+            break;
+        }
+
         default: {
             throw std::logic_error{"Error: Not implemented"};
         }

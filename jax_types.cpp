@@ -23,11 +23,13 @@ std::string_view to_string(dtype_t t) {
 }
 
 bool is_floating(dtype_t t) {
-    return t == dtype_t::F32 || t == dtype_t::F64;
+    using enum dtype_t;
+    return t == F32 || t == F64;
 }
 
 bool is_integral(dtype_t t) {
-    return t == dtype_t::I32 || t == dtype_t::I64;
+    using enum dtype_t;
+    return t == I32 || t == I64 || t == BOOL;
 }
 
 dtype_t widest_float(dtype_t t1, dtype_t t2) {
@@ -110,6 +112,14 @@ void var_t::set_id(size_t new_id) {
 
 const type_t& var_t::get_type() const {
     return type;
+}
+
+const std::vector<size_t> &var_t::get_shape() const {
+    return type.get_shape();
+}
+
+dtype_t var_t::get_dtype() const {
+    return type.get_dtype();
 }
 
 array_t::array_t(f32 value)

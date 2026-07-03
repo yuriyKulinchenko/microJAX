@@ -149,9 +149,10 @@ std::ostream& operator<<(std::ostream& stream, const equation& eq) {
 }
 
 std::ostream& emit_expr(std::ostream& stream, const expression& expr, size_t tab_count) {
-    stream << "{\n";
+    std::string space(4 * tab_count, ' ');
 
-    stream << "    lambda ";
+    stream << space << "{\n";
+    stream << space << "    " << "lambda ";
 
     for (size_t i = 0; i < expr.invars.size(); i++) {
         auto& var = expr.invars[i];
@@ -162,15 +163,15 @@ std::ostream& emit_expr(std::ostream& stream, const expression& expr, size_t tab
     stream << ". let\n";
 
     for (auto& eq: expr.equations) {
-        stream << "    " << eq << '\n';
+        stream << space << "    " << eq << '\n';
     }
 
-    stream << "    in (";
+    stream << space << "    " << "in (";
     emit_value_vector(stream, expr.outvals, ", ");
     if (expr.outvals.size() == 1) stream << ',';
     stream << ")\n";
 
-    stream << "}\n";
+    stream << space <<  "}\n";
     return stream;
 }
 
