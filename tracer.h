@@ -55,6 +55,9 @@ public:
         std::vector<size_t> left_batch,
         std::vector<size_t> right_batch) const;
 
+    template<typename... Fs, typename... Ts>
+    [[nodiscard]] jaxpr_tracer switch_on(std::tuple<Fs...> branches, const Ts&... vals) const;
+
 private:
     jax::var_t var;
     jaxpr_builder& builder;
@@ -78,5 +81,47 @@ public:
 
     jax::expression jaxpr;
 };
+
+template<typename... Fs, typename... Ts>
+jaxpr_tracer jaxpr_tracer::switch_on(
+        std::tuple<Fs...> branches,
+        const Ts&... vals) const {
+    using namespace jax;
+
+    // propagate_branch will construct a jaxpr corresponding to each branch:
+    auto propagate_branch = [&](const auto& f) -> expression {
+        jaxpr_builder builder {};
+
+        std::array<jaxpr_tracer, sizeof...(Ts)> tracer_inputs
+            {builder.register_tracer(vals.get_type().get_dtype())...};
+
+        builder.register_output(std::apply(f, tracer_inputs));
+        return builder.get_jaxpr();
+    };
+
+    auto get_branch_expressions = [&](Fs... branches_) -> std::vector<expression> {
+        return {propagate_branch(branches_)...};
+    };
+
+    std::vector<expression> branch_expressions = std::apply(get_branch_expressions, branches);
+
+    // TODO: for now, I will assume that all branch expressions return the same type
+
+    if (branch_expressions.size() == 0) {
+        throw std::logic_error("Error: expect at least one branch in switch expression");
+    }
+
+    var_t output_var {builder.jaxpr.new_var_id(),
+        branch_expressions[0].equations[0].get_output(0).get_type()};
+
+    builder.jaxpr.equations.emplace_back(
+        std::vector{value{var}, value{vals.get_var()}...},
+        std::vector{output_var},
+        primitive_op::COND,
+        cond_params{std::move(branch_expressions)}
+    );
+
+    return {builder, std::move(output_var)};
+}
 
 #endif //TRACER_H

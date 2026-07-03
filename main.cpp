@@ -20,10 +20,14 @@ int main() {
     // Construct tracer:
     jaxpr_builder builder {};
 
-    auto x = builder.register_tracer(F32, 10);
-    auto y = builder.register_tracer(F64, 20, 10);
+    auto i = builder.register_tracer(I32);
+    auto x = builder.register_tracer(F32, 10, 10);
+    auto y = builder.register_tracer(F32, 10, 10);
 
-    builder.register_output(x + y);
+    builder.register_output(switch_on(i, std::tuple{
+        [](auto& x, auto& y){return x + y;},
+        [](auto& x, auto& y){return x * y;}
+    }, x, y));
 
     auto jaxpr = builder.get_jaxpr();
     std::cout << "Original expression:\n" << jaxpr;
@@ -31,6 +35,6 @@ int main() {
     // auto grad_jaxpr = grad(jaxpr);
     // std::cout << "Grad expression:\n" << grad_jaxpr;
 
-    auto grad_general_jaxpr = grad_general(jaxpr);
-    std::cout << "Grad general expression:\n" << grad_general_jaxpr;
+    // auto grad_general_jaxpr = grad_general(jaxpr);
+    // std::cout << "Grad general expression:\n" << grad_general_jaxpr;
 }

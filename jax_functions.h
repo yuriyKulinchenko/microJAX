@@ -73,6 +73,11 @@ T convert_element_type(T x, dtype_t new_dtype) {
     return x.convert_element_type(new_dtype);
 }
 
+template<typename T, typename... Us, typename... Fs>
+T switch_on(T index, std::tuple<Fs...> branches, Us... values) {
+    return index.switch_on(branches, values...);
+}
+
 }
 
 #endif //JAX_FUNCTIONS_H

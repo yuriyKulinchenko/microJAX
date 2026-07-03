@@ -142,6 +142,17 @@ std::ostream& operator<<(std::ostream& stream, const equation& eq) {
             stream << "[new_dtype=" << to_lower(to_string(params.new_dtype)) << ']';
             break;
         }
+
+        case primitive_op::COND: {
+            const auto& params = std::get<cond_params>(eq.get_params());
+            stream << "[branches=(\n";
+            for (auto& branch: params.branches) {
+                stream << branch;
+            }
+            stream << ")]";
+
+        }
+
         default:
     }
     stream << ' ';

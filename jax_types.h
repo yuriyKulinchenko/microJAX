@@ -23,7 +23,7 @@ namespace jax {
     X(SIN) X(COS) X(EXP) X(LOG)                 \
     X(NEG) X(TRANSPOSE) X(REDUCE_SUM)           \
     X(DOT_GENERAL) X(BROADCAST_IN_DIM)          \
-    X(CONVERT_ELEMENT_TYPE)
+    X(CONVERT_ELEMENT_TYPE) X(COND)
 
 #define TYPE_ENUM_LIST(X) \
     X(I32) X(I64) X(F32) X(F64) X(BOOL)
@@ -348,10 +348,7 @@ implicit_broadcast_result get_implicit_broadcast_result(const std::vector<size_t
     const std::vector<size_t>& right_shape);
 
 
-// An equation will look something like:
-// a:f32[8] = sin b
-// c:f32[] = add a b
-
+struct expression;
 
 struct transpose_params {
     std::vector<size_t> permutation;
@@ -377,13 +374,18 @@ struct convert_element_type_params {
     dtype_t new_dtype;
 };
 
+struct cond_params {
+    std::vector<expression> branches;
+};
+
 using params_variant = std::variant<
     std::monostate,
     transpose_params,
     dot_general_params,
     reduce_sum_params,
     broadcast_in_dim_params,
-    convert_element_type_params
+    convert_element_type_params,
+    cond_params
 >;
 
 class equation {
