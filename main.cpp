@@ -16,21 +16,23 @@ T softmax(T vec) {
 
 int main() {
     using namespace jax;
+    using enum dtype_t;
     // Construct tracer:
     jaxpr_builder builder {};
 
-    auto x = builder.register_tracer(type_enum::F32, 10);
-    builder.register_output(reduce_sum(softmax(x), {0}));
+    auto x = builder.register_tracer(F32, 10);
+    auto y = builder.register_tracer(F64, 20, 10);
+
+    builder.register_output(x + y);
 
     auto jaxpr = builder.get_jaxpr();
     std::cout << "Original expression:\n" << jaxpr;
 
+    return 0;
 
     auto grad_jaxpr = grad(jaxpr);
     std::cout << "Grad expression:\n" << grad_jaxpr;
 
     auto grad_general_jaxpr = grad_general(jaxpr);
     std::cout << "Grad general expression:\n" << grad_general_jaxpr;
-
-    return 0;
 }

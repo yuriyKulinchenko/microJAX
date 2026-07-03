@@ -13,44 +13,85 @@ std::string_view to_string(primitive_op op) {
     return "";
 }
 
-std::string_view to_string(type_enum t) {
+std::string_view to_string(dtype_t t) {
     switch (t) {
-#define X(name) case type_enum::name: return #name;
+#define X(name) case dtype_t::name: return #name;
         TYPE_ENUM_LIST(X)
 #undef X
     }
     return "";
 }
 
-type_t::type_t(type_enum base_type):
-base_type(base_type) {}
+bool is_floating(dtype_t t) {
+    return t == dtype_t::F32 || t == dtype_t::F64;
+}
 
-type_t::type_t(type_enum base_type, std::vector<size_t> shape):
-base_type(base_type),
+bool is_integral(dtype_t t) {
+    return t == dtype_t::I32 || t == dtype_t::I64;
+}
+
+dtype_t widest_float(dtype_t t1, dtype_t t2) {
+    using enum dtype_t;
+    return (t1 == F64 || t2 == F64) ? F64 : F32;
+}
+
+dtype_t widest_int(dtype_t t1, dtype_t t2) {
+    using enum dtype_t;
+    return (t1 == I64 || t2 == I64) ? I64 : I32;
+}
+
+dtype_t resultant_type(dtype_t t1, dtype_t t2) {
+    using enum dtype_t;
+    if (t1 == BOOL) return t2;
+    if (t2 == BOOL) return t1;
+
+    if (is_floating(t1)) {
+        if (is_floating(t2)) {
+            return widest_float(t1, t2);
+        }
+        return t1;
+    }
+
+    if (is_floating(t2)) {
+        return t2;
+    }
+
+    return widest_int(t1, t2);
+}
+
+type_t::type_t(dtype_t dtype):
+dtype(dtype) {}
+
+type_t::type_t(dtype_t dtype, std::vector<size_t> shape):
+dtype(dtype),
 shape(std::move(shape)) {}
 
 bool type_t::operator==(const type_t& other) const {
-    return base_type == other.base_type && shape == other.shape;
+    return dtype == other.dtype && shape == other.shape;
 }
 
-bool type_t::is_i32() {
-    return base_type == type_enum::I32;
+bool type_t::is_i32() const {
+    return dtype == dtype_t::I32;
 }
 
-bool type_t::is_i64() {
-    return base_type == type_enum::I64;
+bool type_t::is_i64() const {
+    return dtype == dtype_t::I64;
 }
 
-bool type_t::is_f32() {
-    return base_type == type_enum::F32;
+bool type_t::is_f32() const {
+    return dtype == dtype_t::F32;
 }
 
-bool type_t::is_f64() {
-    return base_type == type_enum::F64;
+bool type_t::is_f64() const {
+    return dtype == dtype_t::F64;
 }
 
-type_enum type_t::get_base_type() const {
-    return base_type;
+bool type_t::is_bool() const {
+    return dtype == dtype_t::BOOL;
+}
+
+dtype_t type_t::get_dtype() const {
+    return dtype;
 }
 
 const std::vector<size_t>& type_t::get_shape() const {
@@ -72,7 +113,7 @@ const type_t& var_t::get_type() const {
 }
 
 array_t::array_t(f32 value)
-: array_t(type_t{type_enum::F32}, std::vector<f32>{value}) {
+: array_t(type_t{dtype_t::F32}, std::vector<f32>{value}) {
     check_single_value();
 }
 
@@ -235,7 +276,7 @@ void expression::eliminate_dead_code() {
 std::vector<size_t> get_implicit_broadcast_shape(const std::vector<size_t>& left_shape,
     const std::vector<size_t>& right_shape) {
 
-    // Normalise so that left_shape.size() < right_shape.size():
+    // Normalize so that left_shape.size() < right_shape.size():
     if (right_shape.size() < left_shape.size())
         return get_implicit_broadcast_shape(right_shape, left_shape);
 
@@ -257,6 +298,8 @@ std::vector<size_t> get_implicit_broadcast_shape(const std::vector<size_t>& left
             new_shape[delta + i] = right_shape[i];
         } else if (right_shape[delta + i] == 1) {
             new_shape[delta + i] = left_shape[delta + i];
+        } else if (left_shape[i] == right_shape[delta + i]) {
+            new_shape[delta + i] = left_shape[i];
         } else {
             std::cerr << left_shape << '\n';
             std::cerr << right_shape << '\n';

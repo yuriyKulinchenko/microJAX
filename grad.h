@@ -14,7 +14,7 @@ class grad_class {
 
 
     /*
-    grad_general is the generalisable form of find_grad,
+    grad_general is the generalizable form of find_grad,
     which is able to handle multi-input, multi-output expressions
     and transform them into expressions which back-propagate adjoints
     given the output adjoints and input parameters.

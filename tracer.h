@@ -42,6 +42,7 @@ public:
 
     [[nodiscard]] jaxpr_tracer transpose(std::vector<size_t> permutation) const;
     [[nodiscard]] jaxpr_tracer reduce_sum(std::vector<size_t> axes) const;
+    [[nodiscard]] jaxpr_tracer convert_element_type(jax::dtype_t dtype) const;
 
     [[nodiscard]] jaxpr_tracer broadcast_in_dim(
         std::vector<size_t> shape,
@@ -69,8 +70,8 @@ public:
 
 
     template<std::convertible_to<size_t>... Args>
-    jaxpr_tracer register_tracer(jax::type_enum base_type, Args... shape) {
-        return register_tracer(jax::type_t{base_type, shape...});
+    jaxpr_tracer register_tracer(jax::dtype_t dtype, Args... shape) {
+        return register_tracer(jax::type_t{dtype, shape...});
     }
 
     [[nodiscard]] jax::expression&& get_jaxpr();

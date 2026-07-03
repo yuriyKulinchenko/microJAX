@@ -470,7 +470,7 @@ void grad_class::propagate_adjoints(const equation& eq) {
                     x = output_shape[x];
                 }
 
-                auto summed_type = type_t{input_var.get_type().get_base_type(), std::move(summed_shape)};
+                auto summed_type = type_t{input_var.get_type().get_dtype(), std::move(summed_shape)};
 
                 auto summed_adjoint = fresh_var(std::move(summed_type));
 
@@ -596,7 +596,7 @@ void grad_class::propagate_adjoints(const equation& eq) {
                 std::vector<size_t> inverse_permutation =
                     get_inverse_permutation(params.left_batch, params.left_contract, free_indices_x);
 
-                type_t new_type {x_var.get_type().get_base_type(), permute(x_shape, inverse_permutation)};
+                type_t new_type {x_var.get_type().get_dtype(), permute(x_shape, inverse_permutation)};
 
                 auto dot_general_x = fresh_var(std::move(new_type));
 
@@ -634,7 +634,7 @@ void grad_class::propagate_adjoints(const equation& eq) {
                 std::vector<size_t> inverse_permutation =
                     get_inverse_permutation(params.right_batch, params.right_contract, free_indices_y);
 
-                type_t new_type {y_var.get_type().get_base_type(), permute(y_shape, inverse_permutation)};
+                type_t new_type {y_var.get_type().get_dtype(), permute(y_shape, inverse_permutation)};
 
                 auto dot_general_y = fresh_var(std::move(new_type));
 
@@ -731,7 +731,7 @@ expression grad_class::find_grad() {
 
     // Seed the adjoint of the initial equation:
 
-    update_adjoint(output_var, value{array_t::build_fill(type_t{type_enum::F32}, 1)});
+    update_adjoint(output_var, value{array_t::build_fill(type_t{dtype_t::F32}, 1)});
 
     // perform a backward pass:
 
@@ -804,6 +804,5 @@ expression grad_class::find_grad_general() {
 
     return output_expr;
 }
-
 
 

@@ -14,6 +14,7 @@ using i32 = int32_t;
 using i64 = int64_t;
 using f32 = float; // Temporary: these may not be true
 using f64 = double;
+using b8 = uint8_t; // byte-backed boolean
 
 namespace jax {
 
@@ -21,10 +22,11 @@ namespace jax {
     X(ADD) X(SUB) X(MUL) X(DIV)                 \
     X(SIN) X(COS) X(EXP) X(LOG)                 \
     X(NEG) X(TRANSPOSE) X(REDUCE_SUM)           \
-    X(DOT_GENERAL) X(BROADCAST_IN_DIM)
+    X(DOT_GENERAL) X(BROADCAST_IN_DIM)          \
+    X(CONVERT_ELEMENT_TYPE)
 
 #define TYPE_ENUM_LIST(X) \
-    X(I32) X(I64) X(F32) X(F64)
+    X(I32) X(I64) X(F32) X(F64) X(BOOL)
 
 enum class primitive_op {
 #define X(name) name,
@@ -32,39 +34,44 @@ enum class primitive_op {
 #undef X
 };
 
-enum class type_enum {
+enum class dtype_t {
 #define X(name) name,
     TYPE_ENUM_LIST(X)
 #undef X
 };
 
 std::string_view to_string(primitive_op op);
-std::string_view to_string(type_enum t);
+std::string_view to_string(dtype_t t);
+
+bool is_floating(dtype_t t);
+bool is_integral(dtype_t t);
+dtype_t resultant_type(dtype_t t1, dtype_t t2);
 
 class type_t {
 public:
 
-    explicit type_t(type_enum base_type);
+    explicit type_t(dtype_t dtype);
 
-    type_t(type_enum base_type, std::vector<size_t> shape);
+    type_t(dtype_t dtype, std::vector<size_t> shape);
 
     template<std::convertible_to<size_t>... Dims>
-    explicit type_t(type_enum base_type, Dims... shape)
-    : base_type(base_type), shape{static_cast<size_t>(shape)...} {}
+    explicit type_t(dtype_t dtype, Dims... shape)
+    : dtype(dtype), shape{static_cast<size_t>(shape)...} {}
 
 
     bool operator==(const type_t& other) const;
 
-    bool is_i32();
-    bool is_i64();
-    bool is_f32();
-    bool is_f64();
+    bool is_i32() const;
+    bool is_i64() const;
+    bool is_f32() const;
+    bool is_f64() const;
+    bool is_bool() const;
 
-    [[nodiscard]] type_enum get_base_type() const;
+    [[nodiscard]] dtype_t get_dtype() const;
     [[nodiscard]] const std::vector<size_t>& get_shape() const;
 
 private:
-    type_enum base_type;
+    dtype_t dtype;
     std::vector<size_t> shape;
 };
 
@@ -85,19 +92,21 @@ private:
 
 #define check_type(T_real, T_enum)                          \
 if constexpr (std::is_same_v<T, T_real>) {                  \
-    if(type.get_base_type() != type_enum::T_enum) {         \
+    if(type.get_dtype() != dtype_t::T_enum) {         \
         throw std::logic_error("Error: type mismatch");     \
     }                                                       \
 }
 
 using vector_variant = std::variant<
     std::vector<i32>, std::vector<i64>,
-    std::vector<f32>,std::vector<f64>
+    std::vector<f32>,std::vector<f64>,
+    std::vector<b8>
 >;
 
 using span_variant = std::variant<
     std::span<const i32>, std::span<const i64>,
-    std::span<const f32>,std::span<const f64>
+    std::span<const f32>,std::span<const f64>,
+    std::span<const b8>
 >;
 
 inline size_t num_elements(std::span<const size_t> shape) {
@@ -122,12 +131,13 @@ inline size_t flatten_index(std::span<const size_t> stride, const std::vector<si
 }
 
 #define ACCESS_DISPATCH(...)                    \
-switch (type.get_base_type()) {                 \
-    using enum type_enum;                       \
+switch (type.get_dtype()) {                     \
+    using enum dtype_t;                         \
     case I32: return access<i32>(__VA_ARGS__);  \
     case I64: return access<i64>(__VA_ARGS__);  \
     case F32: return access<f32>(__VA_ARGS__);  \
     case F64: return access<f64>(__VA_ARGS__);  \
+    case BOOL: return access<b8>(__VA_ARGS__);  \
     default: return 0;                          \
 }
 
@@ -142,6 +152,7 @@ public:
         check_type(i64, I64);
         check_type(f32, F32);
         check_type(f64, F64);
+        check_type(b8, BOOL);
 
         if (std::get<std::vector<T>>(this->value).size() != num_elements(this->type.get_shape())) {
             throw std::logic_error("Error: array value does not match the size of its dimensions");
@@ -174,8 +185,8 @@ public:
 
     template<typename T>
     static array_t build_fill(type_t type, T value) {
-        switch (type.get_base_type()) {
-            using enum type_enum;
+        switch (type.get_dtype()) {
+            using enum dtype_t;
             case I32:
             return array_t{std::move(type), std::vector<i32>(num_elements(type.get_shape()), value)};
             case I64:
@@ -184,6 +195,8 @@ public:
             return array_t{std::move(type), std::vector<f32>(num_elements(type.get_shape()), value)};
             case F64:
             return array_t{std::move(type), std::vector<f64>(num_elements(type.get_shape()), value)};
+            case BOOL:
+            return array_t{std::move(type), std::vector<b8>(num_elements(type.get_shape()), value)};
             default:
             return array_t{0};
         }
@@ -193,11 +206,11 @@ public:
     array_t(f32 value);
 
     // Quite inefficient, use sparingly
-    std::variant<i32, i64, f32, f64> operator[](std::same_as<size_t> auto... indices) {
+    std::variant<i32, i64, f32, f64, b8> operator[](std::same_as<size_t> auto... indices) {
         ACCESS_DISPATCH(indices...)
     }
 
-    std::variant<i32, i64, f32, f64> operator[](const std::vector<size_t>& indices) {
+    std::variant<i32, i64, f32, f64, b8> operator[](const std::vector<size_t>& indices) {
         ACCESS_DISPATCH(indices)
     }
 
@@ -241,10 +254,10 @@ private:
 
 
 struct type_span {
-    type_enum base_type;
+    dtype_t dtype;
     std::span<const size_t> shape;
 
-    [[nodiscard]] type_enum get_base_type() const { return base_type; }
+    [[nodiscard]] dtype_t get_dtype() const { return dtype; }
     [[nodiscard]] std::span<const size_t> get_shape() const { return shape; }
 };
 
@@ -253,7 +266,7 @@ class array_span {
 public:
 
     array_span(const array_t& array, const std::vector<size_t>& indices) {
-        type.base_type = array.type.get_base_type();
+        type.dtype = array.type.get_dtype();
 
         size_t i_0 = 0;
         for (size_t i = 0; i < indices.size(); i++) {
@@ -273,11 +286,11 @@ public:
         }, array.value);
     }
 
-    std::variant<i32, i64, f32, f64> operator[](std::same_as<size_t> auto... indices) const {
+    std::variant<i32, i64, f32, f64, b8> operator[](std::same_as<size_t> auto... indices) const {
         ACCESS_DISPATCH(indices...)
     }
 
-    std::variant<i32, i64, f32, f64> operator[](const std::vector<size_t>& indices) const {
+    std::variant<i32, i64, f32, f64, b8> operator[](const std::vector<size_t>& indices) const {
         ACCESS_DISPATCH(indices)
     }
 
@@ -301,13 +314,6 @@ private:
     span_variant value;
 };
 
-// How would I provide an arbitrary builder expression?
-// User will have to provide a lambda, or a callable in general, which takes a vector
-// jax::array::build(type, f)
-// f : const std::vector<size_t>& -> T
-// Challenge is dyanmic iteration through indices, without relying on expensive recursion etc
-// Ideally, implement a linear scan over shape
-// Manually maintain an index stack!
 
 #undef check_type
 #undef ACCESS_DISPATCH
@@ -365,12 +371,17 @@ struct broadcast_in_dim_params {
     std::vector<size_t> broadcast_dimensions;
 };
 
+struct convert_element_type_params {
+    dtype_t new_dtype;
+};
+
 using params_variant = std::variant<
     std::monostate,
     transpose_params,
     dot_general_params,
     reduce_sum_params,
-    broadcast_in_dim_params
+    broadcast_in_dim_params,
+    convert_element_type_params
 >;
 
 class equation {

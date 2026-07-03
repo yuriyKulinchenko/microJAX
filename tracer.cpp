@@ -18,9 +18,7 @@ jaxpr_tracer elementwise_binary_op(
     if (left_shape != right_shape) {
         // A reshape must occur:
         auto result = get_implicit_broadcast_result(left_shape, right_shape);
-        type_t new_type{v1.get_type().get_base_type(), result.new_shape};
-
-        var_t result_var {builder.jaxpr.new_var_id(), new_type};
+        type_t new_type{v1.get_type().get_dtype(), result.new_shape};
 
         auto get_left_broadcast_var = [&]() -> var_t {
             var_t v1_broadcast {builder.jaxpr.new_var_id(), new_type};
@@ -29,7 +27,7 @@ jaxpr_tracer elementwise_binary_op(
                 std::vector{v1},
                 std::vector{v1_broadcast},
                 primitive_op::BROADCAST_IN_DIM,
-                broadcast_in_dim_params{std::move(result.new_shape),
+                broadcast_in_dim_params{result.new_shape,
                     std::move(result.left_broadcast_dimensions)}
             );
 
@@ -43,7 +41,7 @@ jaxpr_tracer elementwise_binary_op(
                 std::vector{v2},
                 std::vector{v2_broadcast},
                 primitive_op::BROADCAST_IN_DIM,
-                broadcast_in_dim_params{std::move(result.new_shape),
+                broadcast_in_dim_params{result.new_shape,
                     std::move(result.right_broadcast_dimensions)}
             );
 
@@ -53,6 +51,7 @@ jaxpr_tracer elementwise_binary_op(
         if (left_shape == result.new_shape) {
             // The left shape has not changed, but the right shape has:
             var_t v2_broadcast = get_right_broadcast_var();
+            var_t result_var {builder.jaxpr.new_var_id(), new_type};
 
             builder.jaxpr.equations.emplace_back(
                 std::vector{v1, value{std::move(v2_broadcast)}},
@@ -60,27 +59,34 @@ jaxpr_tracer elementwise_binary_op(
                 op
             );
 
-        } else if (right_shape == result.new_shape) {
-            var_t v1_broadcast = get_left_broadcast_var();
+            return {builder, std::move(result_var)};
+        }
+
+        if (right_shape == result.new_shape) {
             // The right shape has not changed, but the left shape has:
+            var_t v1_broadcast = get_left_broadcast_var();
+            var_t result_var {builder.jaxpr.new_var_id(), new_type};
+
             builder.jaxpr.equations.emplace_back(
                 std::vector{value{std::move(v1_broadcast)}, v2},
                 std::vector{result_var},
                 op
             );
 
-        } else {
-            // Both have changed:
-
-            var_t v1_broadcast = get_left_broadcast_var();
-            var_t v2_broadcast = get_right_broadcast_var();
-
-            builder.jaxpr.equations.emplace_back(
-                std::vector{value{std::move(v1_broadcast)}, value{std::move(v2_broadcast)}},
-                std::vector{result_var},
-                op
-            );
+            return {builder, std::move(result_var)};
         }
+
+        // Both have changed:
+
+        var_t v1_broadcast = get_left_broadcast_var();
+        var_t v2_broadcast = get_right_broadcast_var();
+        var_t result_var {builder.jaxpr.new_var_id(), new_type};
+
+        builder.jaxpr.equations.emplace_back(
+            std::vector{value{std::move(v1_broadcast)}, value{std::move(v2_broadcast)}},
+            std::vector{result_var},
+            op
+        );
 
         return {builder, std::move(result_var)};
     }
@@ -122,30 +128,53 @@ jaxpr_tracer unary_op(const value& val, type_t type, primitive_op op,
     return {builder, std::move(new_var)};
 }
 
+value promote(const value& val, dtype_t dtype, jaxpr_builder& builder) {
+    // Precondition: dtype > dtype(val)
+    const auto& old_type = val.get_type();
+    if (old_type.get_dtype() != dtype) {
+        type_t new_type {dtype, old_type.get_shape()};
+        var_t cast_var {builder.jaxpr.new_var_id(), std::move(new_type)};
 
-#define DIMENSIONALITY_ERROR(v1, v2)                                                                \
-if(v1.get_type().get_base_type() != v2.get_type().get_base_type()) {                                \
-    throw std::logic_error("ERROR: dimensionality mismatch when attempting elementwise operation"); \
-}                                                                                                   \
+        builder.jaxpr.equations.emplace_back(
+            std::vector{val},
+            std::vector{cast_var},
+            primitive_op::CONVERT_ELEMENT_TYPE,
+            convert_element_type_params{dtype}
+        );
+
+        return value {cast_var};
+
+    }
+    return val;
+}
 
 #define ELEMENTWISE_BINARY_OP_TRACER_TRACER(op, op_name)                                        \
 jaxpr_tracer operator op (const jaxpr_tracer& t1, const jaxpr_tracer& t2) {                     \
-    DIMENSIONALITY_ERROR(t1, t2);                                                               \
-    return elementwise_binary_op(jax::value{t1.var}, jax::value{t2.var}, op_name, t1.builder);  \
-}                                                                                               \
+    dtype_t dtype = resultant_type(t1.get_type().get_dtype(), t2.get_type().get_dtype());       \
+    return elementwise_binary_op(                                                               \
+        promote(value{t1.var}, dtype, t1.builder),                                              \
+        promote(value{t2.var}, dtype, t1.builder),                                              \
+        op_name,t1.builder);                                                                    \
+}
 
 #define ELEMENTWISE_BINARY_OP_TRACER_ARRAY(op, op_name)                                         \
 jaxpr_tracer operator op (const jaxpr_tracer& t1, const jax::array_t& array) {                  \
-    DIMENSIONALITY_ERROR(t1, array);                                                            \
-    return elementwise_binary_op(jax::value{t1.var}, jax::value{array}, op_name, t1.builder);   \
-}                                                                                               \
-
+    dtype_t dtype = resultant_type(t1.get_type().get_dtype(), array.get_type().get_dtype());    \
+    return elementwise_binary_op(                                                               \
+        promote(value{t1.var}, dtype, t1.builder),                                              \
+        promote(value{array}, dtype, t1.builder),                                               \
+        op_name,t1.builder);                                                                    \
+}
 
 #define ELEMENTWISE_BINARY_OP_ARRAY_TRACER(op, op_name)                                         \
 jaxpr_tracer operator op (const jax::array_t& array, const jaxpr_tracer& t1) {                  \
-    DIMENSIONALITY_ERROR(array, t1);                                                            \
-    return elementwise_binary_op(jax::value{array}, jax::value{t1.var}, op_name, t1.builder);   \
-}                                                                                               \
+    dtype_t dtype = resultant_type(t1.get_type().get_dtype(), array.get_type().get_dtype());    \
+    return elementwise_binary_op(                                                               \
+        promote(value{array}, dtype, t1.builder),                                               \
+        promote(value{t1.var}, dtype, t1.builder),                                              \
+        op_name,t1.builder);                                                                    \
+}
+
 
 #define ELEMENTWISE_BINARY_OP(op, op_name)          \
 ELEMENTWISE_BINARY_OP_TRACER_TRACER(op, op_name)    \
@@ -188,9 +217,7 @@ jaxpr_tracer jaxpr_tracer::transpose(std::vector<size_t> permutation) const {
         new_shape[i] = old_shape[permutation[i]];
     }
 
-    type_t new_type {var.get_type().get_base_type(), std::move(new_shape)};
-
-
+    type_t new_type {var.get_type().get_dtype(), std::move(new_shape)};
 
     return unary_op(value{var}, std::move(new_type),  primitive_op::TRANSPOSE,
         transpose_params{std::move(permutation)}, builder);
@@ -223,14 +250,21 @@ jaxpr_tracer jaxpr_tracer::reduce_sum(std::vector<size_t> axes) const {
         new_shape[j++] = old_shape[i];
     }
 
-    type_t new_type {var.get_type().get_base_type(), std::move(new_shape)};
+    type_t new_type {var.get_type().get_dtype(), std::move(new_shape)};
 
     return unary_op(value{var}, std::move(new_type), primitive_op::REDUCE_SUM,
         reduce_sum_params{std::move(axes)}, builder);
 }
 
+jaxpr_tracer jaxpr_tracer::convert_element_type(dtype_t dtype) const {
+    type_t new_type {dtype, var.get_type().get_shape()};
+
+    return unary_op(value{var}, std::move(new_type), primitive_op::CONVERT_ELEMENT_TYPE,
+        convert_element_type_params {dtype}, builder);
+}
+
 jaxpr_tracer jaxpr_tracer::broadcast_in_dim(std::vector<size_t> shape,
-    std::vector<size_t> broadcast_dimensions) const {
+                                            std::vector<size_t> broadcast_dimensions) const {
     // If shape(x) = (2, 3)
     // if broadcast_dimensions=(0, 2), shape=(2,4,3) then:
     // y_i0,i1,i2 = x_i0,i2
@@ -264,7 +298,7 @@ jaxpr_tracer jaxpr_tracer::broadcast_in_dim(std::vector<size_t> shape,
         }
     }
 
-    type_t new_type {var.get_type().get_base_type(), shape};
+    type_t new_type {var.get_type().get_dtype(), shape};
     return unary_op(
         value{var}, std::move(new_type), primitive_op::BROADCAST_IN_DIM,
         broadcast_in_dim_params{
@@ -365,7 +399,7 @@ jaxpr_tracer jaxpr_tracer::dot_general(
         if (!right_batch_set.contains(free_dim)) new_shape.push_back(other_shape[free_dim]);
     }
 
-    type_t new_type {var.get_type().get_base_type(), new_shape};
+    type_t new_type {var.get_type().get_dtype(), new_shape};
 
     var_t new_var {builder.jaxpr.new_var_id(), std::move(new_type)};
 

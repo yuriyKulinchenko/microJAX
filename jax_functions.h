@@ -3,6 +3,7 @@
 
 #include <type_traits>
 #include <valarray>
+#include <vector>
 
 namespace jax {
 
@@ -65,6 +66,11 @@ T dot_general(T x, T y,
 template<typename T>
 T broadcast_in_dim(T x, std::vector<size_t> shape, std::vector<size_t> broadcast_dimensions) {
     return x.broadcast_in_dim(std::move(shape), std::move(broadcast_dimensions));
+}
+
+template<typename T>
+T convert_element_type(T x, dtype_t new_dtype) {
+    return x.convert_element_type(new_dtype);
 }
 
 }

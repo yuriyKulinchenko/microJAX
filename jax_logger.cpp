@@ -4,7 +4,7 @@
 using namespace jax;
 
 std::ostream& operator<<(std::ostream& stream, const type_t& type) {
-    stream << to_lower(to_string(type.get_base_type()));
+    stream << to_lower(to_string(type.get_dtype()));
     stream << '[';
     const std::vector<size_t>& shape = type.get_shape();
     for (int i = 0; i < shape.size(); i++) {
@@ -35,7 +35,7 @@ std::ostream& operator<<(std::ostream& stream, const array_t& array) {
                 remaining_open_brackets--;
             }
 
-            stream << element;
+            stream << +element;
 
             // Emit sequence of ]]]...
             for (size_t j = index_vector.size(); j--> 0;) {
@@ -136,13 +136,19 @@ std::ostream& operator<<(std::ostream& stream, const equation& eq) {
             stream << ")]";
             break;
         }
+
+        case primitive_op::CONVERT_ELEMENT_TYPE: {
+            const auto& params = std::get<convert_element_type_params>(eq.get_params());
+            stream << "[new_dtype=" << to_lower(to_string(params.new_dtype)) << ']';
+            break;
+        }
         default:
     }
     stream << ' ';
     return emit_value_vector(stream, eq.get_input(), " ");
 }
 
-std::ostream& operator<<(std::ostream& stream, const expression& expr) {
+std::ostream& emit_expr(std::ostream& stream, const expression& expr, size_t tab_count) {
     stream << "{\n";
 
     stream << "    lambda ";
@@ -166,4 +172,8 @@ std::ostream& operator<<(std::ostream& stream, const expression& expr) {
 
     stream << "}\n";
     return stream;
+}
+
+std::ostream& operator<<(std::ostream& stream, const expression& expr) {
+    return emit_expr(stream, expr, 0);
 }
