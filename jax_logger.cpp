@@ -92,7 +92,7 @@ std::ostream& emit_tuple(std::ostream& stream, const std::vector<size_t>& vec) {
     return stream;
 }
 
-std::ostream& operator<<(std::ostream& stream, const equation& eq) {
+std::ostream& emit_equation(std::ostream& stream, const equation& eq, size_t tab_count) {
     for (auto& var: eq.get_output()) {
         emit_typed_var(stream, var) << ' ';
     }
@@ -147,16 +147,21 @@ std::ostream& operator<<(std::ostream& stream, const equation& eq) {
             const auto& params = std::get<cond_params>(eq.get_params());
             stream << "[branches=(\n";
             for (auto& branch: params.branches) {
-                stream << branch;
+                emit_expr(stream, branch, tab_count + 1);
             }
-            stream << ")]";
-
+            stream << std::string(4 * tab_count, ' ');
+            stream << "    )]";
+            break;
         }
 
         default:
     }
     stream << ' ';
     return emit_value_vector(stream, eq.get_input(), " ");
+}
+
+std::ostream& operator<<(std::ostream& stream, const equation& eq) {
+    return emit_equation(stream, eq, 0);
 }
 
 std::ostream& emit_expr(std::ostream& stream, const expression& expr, size_t tab_count) {
@@ -174,7 +179,8 @@ std::ostream& emit_expr(std::ostream& stream, const expression& expr, size_t tab
     stream << ". let\n";
 
     for (auto& eq: expr.equations) {
-        stream << space << "    " << eq << '\n';
+        stream << space << "    ";
+        emit_equation(stream, eq, tab_count) << '\n';
     }
 
     stream << space << "    " << "in (";

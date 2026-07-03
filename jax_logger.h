@@ -16,6 +16,7 @@ std::ostream& emit_value_vector(std::ostream& stream,
 
 std::ostream& emit_tuple(std::ostream& stream, const std::vector<size_t>& vec);
 
+std::ostream& emit_equation(std::ostream& stream, const jax::equation& eq, size_t tab_count);
 std::ostream& operator<<(std::ostream& stream, const jax::equation& eq);
 
 std::ostream& emit_expr(std::ostream& stream, const jax::expression& expr, size_t tab_count);
