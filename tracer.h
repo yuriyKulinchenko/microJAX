@@ -23,18 +23,16 @@ public:
         return var;
     }
 
-    friend jaxpr_tracer operator+(const jaxpr_tracer&, const jaxpr_tracer&);
-    friend jaxpr_tracer operator+(const jaxpr_tracer&, const jax::array_t&);
-    friend jaxpr_tracer operator+(const jax::array_t&, const jaxpr_tracer&);
-    friend jaxpr_tracer operator-(const jaxpr_tracer&, const jaxpr_tracer&);
-    friend jaxpr_tracer operator-(const jaxpr_tracer&, const jax::array_t&);
-    friend jaxpr_tracer operator-(const jax::array_t&, const jaxpr_tracer&);
-    friend jaxpr_tracer operator*(const jaxpr_tracer&, const jaxpr_tracer&);
-    friend jaxpr_tracer operator*(const jaxpr_tracer&, const jax::array_t&);
-    friend jaxpr_tracer operator*(const jax::array_t&, const jaxpr_tracer&);
-    friend jaxpr_tracer operator/(const jaxpr_tracer&, const jaxpr_tracer&);
-    friend jaxpr_tracer operator/(const jaxpr_tracer&, const jax::array_t&);
-    friend jaxpr_tracer operator/(const jax::array_t&, const jaxpr_tracer&);
+#define BINARY_OP(op)                                                               \
+    friend jaxpr_tracer operator op (const jaxpr_tracer&, const jaxpr_tracer&);     \
+    friend jaxpr_tracer operator op (const jaxpr_tracer&, const jax::array_t&);     \
+    friend jaxpr_tracer operator op (const jax::array_t&, const jaxpr_tracer&);
+
+    BINARY_OP(+); BINARY_OP(-);
+    BINARY_OP(*); BINARY_OP(/);
+    BINARY_OP(==); BINARY_OP(!=);
+    BINARY_OP(<); BINARY_OP(<=);
+    BINARY_OP(>); BINARY_OP(>=);
 
     [[nodiscard]] jaxpr_tracer sin() const;
     [[nodiscard]] jaxpr_tracer cos() const;
@@ -82,6 +80,8 @@ public:
     jax::expression jaxpr;
 };
 
+jax::value promote(const jax::value& val, jax::dtype_t dtype, jaxpr_builder& builder);
+
 template<typename... Fs, typename... Ts>
 jaxpr_tracer jaxpr_tracer::switch_on(
         std::tuple<Fs...> branches,
@@ -115,7 +115,7 @@ jaxpr_tracer jaxpr_tracer::switch_on(
         branch_expressions[0].equations[0].get_output(0).get_type()};
 
     builder.jaxpr.equations.emplace_back(
-        std::vector{value{var}, value{vals.get_var()}...},
+        std::vector{promote(value{var}, dtype_t::I32, builder), value{vals.get_var()}...},
         std::vector{output_var},
         primitive_op::COND,
         cond_params{std::move(branch_expressions)}

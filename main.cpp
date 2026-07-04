@@ -21,10 +21,11 @@ int main() {
     jaxpr_builder builder {};
 
     auto i = builder.register_tracer(I32);
+    auto j = builder.register_tracer(I32);
     auto x = builder.register_tracer(F32, 10, 10);
     auto y = builder.register_tracer(F64, 10, 10);
 
-    builder.register_output(switch_on(i, std::tuple{
+    builder.register_output(switch_on(i < j, std::tuple{
         [](auto& x, auto& y){return x + y;},
         [](auto& x, auto& y){return x * y;}
     }, x, y));

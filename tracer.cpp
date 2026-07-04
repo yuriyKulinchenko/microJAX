@@ -1,5 +1,6 @@
 #include "tracer.h"
 
+#include <optional>
 #include <unordered_set>
 
 #include "jax_functions.h"
@@ -10,15 +11,19 @@ jaxpr_tracer elementwise_binary_op(
     const value& v1,
     const value& v2,
     primitive_op op,
-    jaxpr_builder& builder
+    jaxpr_builder& builder,
+    std::optional<dtype_t> output_dtype = std::nullopt
     ) {
     const std::vector<size_t>& left_shape = v1.get_type().get_shape();
     const std::vector<size_t>& right_shape = v2.get_type().get_shape();
+
+    dtype_t result_dtype = output_dtype.value_or(v1.get_type().get_dtype());
 
     if (left_shape != right_shape) {
         // A reshape must occur:
         auto result = get_implicit_broadcast_result(left_shape, right_shape);
         type_t new_type{v1.get_type().get_dtype(), result.new_shape};
+        type_t result_type{result_dtype, result.new_shape};
 
         auto get_left_broadcast_var = [&]() -> var_t {
             var_t v1_broadcast {builder.jaxpr.new_var_id(), new_type};
@@ -51,7 +56,7 @@ jaxpr_tracer elementwise_binary_op(
         if (left_shape == result.new_shape) {
             // The left shape has not changed, but the right shape has:
             var_t v2_broadcast = get_right_broadcast_var();
-            var_t result_var {builder.jaxpr.new_var_id(), new_type};
+            var_t result_var {builder.jaxpr.new_var_id(), result_type};
 
             builder.jaxpr.equations.emplace_back(
                 std::vector{v1, value{std::move(v2_broadcast)}},
@@ -65,7 +70,7 @@ jaxpr_tracer elementwise_binary_op(
         if (right_shape == result.new_shape) {
             // The right shape has not changed, but the left shape has:
             var_t v1_broadcast = get_left_broadcast_var();
-            var_t result_var {builder.jaxpr.new_var_id(), new_type};
+            var_t result_var {builder.jaxpr.new_var_id(), result_type};
 
             builder.jaxpr.equations.emplace_back(
                 std::vector{value{std::move(v1_broadcast)}, v2},
@@ -80,7 +85,7 @@ jaxpr_tracer elementwise_binary_op(
 
         var_t v1_broadcast = get_left_broadcast_var();
         var_t v2_broadcast = get_right_broadcast_var();
-        var_t result_var {builder.jaxpr.new_var_id(), new_type};
+        var_t result_var {builder.jaxpr.new_var_id(), result_type};
 
         builder.jaxpr.equations.emplace_back(
             std::vector{value{std::move(v1_broadcast)}, value{std::move(v2_broadcast)}},
@@ -91,7 +96,7 @@ jaxpr_tracer elementwise_binary_op(
         return {builder, std::move(result_var)};
     }
 
-    var_t result_var {builder.jaxpr.new_var_id(), v1.get_type()};
+    var_t result_var {builder.jaxpr.new_var_id(), type_t{result_dtype, v1.get_type().get_shape()}};
 
     builder.jaxpr.equations.emplace_back(
         std::vector{v1, v2},
@@ -148,43 +153,50 @@ value promote(const value& val, dtype_t dtype, jaxpr_builder& builder) {
     return val;
 }
 
-#define ELEMENTWISE_BINARY_OP_TRACER_TRACER(op, op_name)                                        \
+#define ELEMENTWISE_BINARY_OP_TRACER_TRACER(op, op_name, output_dtype)                          \
 jaxpr_tracer operator op (const jaxpr_tracer& t1, const jaxpr_tracer& t2) {                     \
     dtype_t dtype = resultant_type(t1.get_type().get_dtype(), t2.get_type().get_dtype());       \
     return elementwise_binary_op(                                                               \
         promote(value{t1.var}, dtype, t1.builder),                                              \
         promote(value{t2.var}, dtype, t1.builder),                                              \
-        op_name,t1.builder);                                                                    \
+        op_name, t1.builder, output_dtype);                                                     \
 }
 
-#define ELEMENTWISE_BINARY_OP_TRACER_ARRAY(op, op_name)                                         \
+#define ELEMENTWISE_BINARY_OP_TRACER_ARRAY(op, op_name, output_dtype)                           \
 jaxpr_tracer operator op (const jaxpr_tracer& t1, const jax::array_t& array) {                  \
     dtype_t dtype = resultant_type(t1.get_type().get_dtype(), array.get_type().get_dtype());    \
     return elementwise_binary_op(                                                               \
         promote(value{t1.var}, dtype, t1.builder),                                              \
         promote(value{array}, dtype, t1.builder),                                               \
-        op_name,t1.builder);                                                                    \
+        op_name, t1.builder, output_dtype);                                                     \
 }
 
-#define ELEMENTWISE_BINARY_OP_ARRAY_TRACER(op, op_name)                                         \
+#define ELEMENTWISE_BINARY_OP_ARRAY_TRACER(op, op_name, output_dtype)                           \
 jaxpr_tracer operator op (const jax::array_t& array, const jaxpr_tracer& t1) {                  \
     dtype_t dtype = resultant_type(t1.get_type().get_dtype(), array.get_type().get_dtype());    \
     return elementwise_binary_op(                                                               \
         promote(value{array}, dtype, t1.builder),                                               \
         promote(value{t1.var}, dtype, t1.builder),                                              \
-        op_name,t1.builder);                                                                    \
+        op_name, t1.builder, output_dtype);                                                     \
 }
 
 
-#define ELEMENTWISE_BINARY_OP(op, op_name)          \
-ELEMENTWISE_BINARY_OP_TRACER_TRACER(op, op_name)    \
-ELEMENTWISE_BINARY_OP_TRACER_ARRAY(op, op_name)     \
-ELEMENTWISE_BINARY_OP_ARRAY_TRACER(op, op_name)     \
+#define ELEMENTWISE_BINARY_OP(op, op_name, output_dtype)          \
+ELEMENTWISE_BINARY_OP_TRACER_TRACER(op, op_name, output_dtype)    \
+ELEMENTWISE_BINARY_OP_TRACER_ARRAY(op, op_name, output_dtype)     \
+ELEMENTWISE_BINARY_OP_ARRAY_TRACER(op, op_name, output_dtype)     \
 
-ELEMENTWISE_BINARY_OP(+, jax::primitive_op::ADD);
-ELEMENTWISE_BINARY_OP(*, jax::primitive_op::MUL);
-ELEMENTWISE_BINARY_OP(-, jax::primitive_op::SUB);
-ELEMENTWISE_BINARY_OP(/, jax::primitive_op::DIV);
+ELEMENTWISE_BINARY_OP(+, jax::primitive_op::ADD, std::nullopt);
+ELEMENTWISE_BINARY_OP(*, jax::primitive_op::MUL, std::nullopt);
+ELEMENTWISE_BINARY_OP(-, jax::primitive_op::SUB, std::nullopt);
+ELEMENTWISE_BINARY_OP(/, jax::primitive_op::DIV, std::nullopt);
+
+ELEMENTWISE_BINARY_OP(==, jax::primitive_op::EQ, dtype_t::BOOL);
+ELEMENTWISE_BINARY_OP(!=, jax::primitive_op::NE, dtype_t::BOOL);
+ELEMENTWISE_BINARY_OP(<, jax::primitive_op::LT, dtype_t::BOOL);
+ELEMENTWISE_BINARY_OP(<=, jax::primitive_op::LE, dtype_t::BOOL);
+ELEMENTWISE_BINARY_OP(>, jax::primitive_op::GT, dtype_t::BOOL);
+ELEMENTWISE_BINARY_OP(>=, jax::primitive_op::GE, dtype_t::BOOL);
 
 jaxpr_tracer jaxpr_tracer::sin() const {
     return unary_op(value{var}, primitive_op::SIN, builder);

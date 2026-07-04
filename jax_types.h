@@ -23,7 +23,8 @@ namespace jax {
     X(SIN) X(COS) X(EXP) X(LOG)                 \
     X(NEG) X(TRANSPOSE) X(REDUCE_SUM)           \
     X(DOT_GENERAL) X(BROADCAST_IN_DIM)          \
-    X(CONVERT_ELEMENT_TYPE) X(COND)
+    X(CONVERT_ELEMENT_TYPE) X(COND)             \
+    X(EQ) X(NE) X(LT) X(LE) X(GT) X(GE)
 
 #define TYPE_ENUM_LIST(X) \
     X(I32) X(I64) X(F32) X(F64) X(BOOL)
