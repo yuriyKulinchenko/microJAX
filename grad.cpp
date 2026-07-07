@@ -77,7 +77,7 @@ value *grad_class::get_adjoint(const var_t& var) {
     return nullptr;
 }
 
-bool grad_class::adjoint_is_active(var_t var, bool apply_update) {
+bool grad_class::adjoint_is_active(const var_t& var, bool apply_update) {
     auto it = active_adjoint_map.find(var.get_id());
     if (it->second) return true;
     if (apply_update) it->second = true;
@@ -765,7 +765,92 @@ void grad_class::propagate_adjoints(const equation& eq) {
         }
 
         case COND: {
-            // TODO: implement cond
+            auto& output_vars = eq.get_output();
+            auto& input_vals = eq.get_input();
+
+            // First, check if the output adjoint is non-zero,
+            // and if any of the input values are variables
+
+            bool active_adjoint_found = false;
+            for (auto& output_var: output_vars) {
+                if (adjoint_is_active(output_var, false)) {
+                    active_adjoint_found = true;
+                    break;
+                }
+            }
+
+            if (!active_adjoint_found) {
+                // Nothing to propagate backwards:
+                break;
+            }
+
+            // Check if any of the input values (excluding the index) are variables:
+
+            bool input_var_exists = false;
+            for (auto& input_val: input_vals | std::views::drop(1)) {
+                if (input_val.is<var_t>()) {
+                    input_var_exists = true;
+                    break;
+                }
+            }
+
+            if (!input_var_exists) {
+                // Nothing to update:
+                break;
+            }
+
+            // Goal is to compute:
+            // cond(i, f'0,...,f'm)(x0,...,xn,y'0,...,y'k)
+
+            auto& params = std::get<cond_params>(eq.get_params());
+
+            std::vector<expression> transformed_branches {};
+            transformed_branches.reserve(params.branches.size());
+
+            for (auto& expr: params.branches) {
+                transformed_branches.push_back(grad_general(expr));
+            }
+
+            // Now, I have to specify a set of new inputs:
+            // (i,x0,...,xn,y'0,...,y'k)
+
+            size_t num_inputs = input_vals.size() + output_vars.size();
+            std::vector inputs {input_vals};
+            inputs.reserve(num_inputs);
+
+            for (auto& output_var: output_vars) {
+                // Find the adjoint of output_var:
+                if (value* adjoint = get_adjoint(output_var)) {
+                    inputs.push_back(*adjoint);
+                } else {
+                    inputs.push_back(value{array_t::build_fill(output_var.get_type(), 0)});
+                }
+            }
+
+            // Now, I have to specify a new set of outputs:
+
+            std::vector<var_t> outputs {};
+            outputs.reserve(input_vals.size() - 1); // exclude the index
+
+            for (auto& input_val: input_vals | std::views::drop(1)) {
+                outputs.push_back(fresh_var(input_val.get_type()));
+            }
+
+            output_expr.equations.emplace_back(
+                std::move(inputs),
+                std::move(outputs),
+                COND,
+                cond_params{std::move(transformed_branches)});
+
+            // Now, update the input adjoints:
+
+            auto& updates = output_expr.equations[output_expr.equations.size() - 1].get_output();
+
+            for (size_t i = 1; i < input_vals.size(); i++) {
+                if (!input_vals[i].is<var_t>()) continue;
+                update_adjoint(input_vals[i].get_var(), value{updates[i - 1]});
+            }
+
             break;
         }
 
@@ -788,14 +873,20 @@ expression grad_class::find_grad() {
         throw formatted_error("Error: expected 1 output, received {}", input_expr.outvals.size());
     }
 
+    // TODO: array outputs should technically be allowed, with a trivial adjoint of 0
+
     if (input_expr.outvals[0].is<array_t>()) {
-        throw formatted_error("Error: expected output to be variable, received array");
+        throw std::logic_error("Error: expected output to be variable, received array");
     }
 
     const var_t& output_var = input_expr.outvals[0].get_var();
 
-    if (output_var.get_type().get_shape().size() != 0) {
-        throw formatted_error("Error: shape of output variable must be scalar");
+    if (is_integral(output_var.get_dtype())) {
+        throw std::logic_error("Error: output variable must have non-integral dtype");
+    }
+
+    if (output_var.get_shape().size() != 0) {
+        throw std::logic_error("Error: shape of output variable must be scalar");
     }
 
     // Add inputs:
@@ -816,7 +907,7 @@ expression grad_class::find_grad() {
 
     // Seed the adjoint of the initial equation:
 
-    update_adjoint(output_var, value{array_t::build_fill(type_t{dtype_t::F32}, 1)});
+    update_adjoint(output_var, value{array_t::build_fill(output_var.get_type(), 1)});
 
     // perform a backward pass:
 

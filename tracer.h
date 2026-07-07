@@ -93,7 +93,7 @@ jaxpr_tracer jaxpr_tracer::switch_on(
         jaxpr_builder builder {};
 
         std::array<jaxpr_tracer, sizeof...(Ts)> tracer_inputs
-            {builder.register_tracer(vals.get_type().get_dtype())...};
+            {builder.register_tracer(vals.get_type())...};
 
         builder.register_output(std::apply(f, tracer_inputs));
         return builder.get_jaxpr();

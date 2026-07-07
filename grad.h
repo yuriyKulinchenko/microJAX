@@ -45,7 +45,7 @@ class grad_class {
         const jax::value& adjoint_val);
 
     void propagate_adjoints(const jax::equation& eq);
-    bool adjoint_is_active(jax::var_t var, bool apply_update=true);
+    bool adjoint_is_active(const jax::var_t& var, bool apply_update=true);
 
     jax::var_t fresh_var(jax::type_t type);
 
