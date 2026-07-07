@@ -9,7 +9,7 @@ and returns the grad / derivative of that computation. This is done through a fo
 followed by backpropagation.
 
 The forward pass will essentially be a copy of the original jaxpr, and it will also be used to
-initialise the adjoints for each variable introduced.
+initialize the adjoints for each variable introduced.
 
 In order to perform backpropagation, you need to track the adjoints of all intermediate nodes
 in the original jaxpr. Adjoints are computed as a sum, so careful handling is required for this
@@ -254,6 +254,28 @@ void grad_class::propagate_adjoints(const equation& eq) {
             break;
         }
 
+        case LOG: {
+            // derivative of y = log(x) is 1/x:
+            // TODO: implement log
+            auto& output_var = eq.get_output(0);
+            auto* output_adj = get_adjoint(output_var);
+            if (!output_adj) break;
+
+            auto& input_var = eq.get_input(0).get_var();
+
+            auto f_prime_var = fresh_var(output_var.get_type());
+
+            output_expr.equations.emplace_back(
+                std::vector{value{input_var}},
+                std::vector{f_prime_var},
+                DIV
+            );
+
+            update_adjoint(input_var, value{f_prime_var}, *output_adj);
+
+            exit(1);
+        }
+
         case NEG: {
             auto& output_var = eq.get_output(0);
             auto* output_adj = get_adjoint(output_var);
@@ -286,6 +308,30 @@ void grad_class::propagate_adjoints(const equation& eq) {
 
             if (y_val.is<var_t>()) {
                 update_adjoint(y_val.get_var(), *output_adj);
+            }
+            break;
+        }
+
+        case SUB: {
+            // z = x - y
+            // x' += dL/dz dz/dx
+            // dz/dx = 1 => x' += z'
+            // Similarly, y' += -1 * z'
+
+            auto& output_var = eq.get_output(0);
+            auto* output_adj = get_adjoint(output_var);
+            if (!output_adj) break;
+
+            auto& x_val = eq.get_input(0);
+            auto& y_val = eq.get_input(1);
+
+            if (x_val.is<var_t>()) {
+                update_adjoint(x_val.get_var(), *output_adj);
+            }
+
+            if (y_val.is<var_t>()) {
+                update_adjoint(y_val.get_var(),
+                    value{array_t::build_fill(y_val.get_type(), -1)}, *output_adj);
             }
             break;
         }
@@ -717,6 +763,19 @@ void grad_class::propagate_adjoints(const equation& eq) {
             update_adjoint(input_var, value{converted_adjoint});
             break;
         }
+
+        case COND: {
+            // TODO: implement cond
+            break;
+        }
+
+        case EQ:
+        case NE:
+        case LT:
+        case LE:
+        case GT:
+        case GE:
+        break;
 
         default: {
             throw std::logic_error{"Error: Not implemented"};

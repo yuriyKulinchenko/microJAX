@@ -445,7 +445,7 @@ inline void test_fn() {
         std::variant<double, std::pair<double,double>, std::tuple<double, double, double>>>);
     static_assert(std::same_as<shape::tag_type, test>);
 
-    shape x = shape::make<Circle>(5);
+    // shape x = shape::make<Circle>(5);
 
     auto z = match(x,
         [] (double& v) {

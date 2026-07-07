@@ -188,18 +188,19 @@ public:
 
     template<typename T>
     static array_t build_fill(type_t type, T value) {
+        size_t count = num_elements(type.get_shape());
         switch (type.get_dtype()) {
             using enum dtype_t;
             case I32:
-            return array_t{std::move(type), std::vector<i32>(num_elements(type.get_shape()), value)};
+            return array_t{std::move(type), std::vector<i32>(count, value)};
             case I64:
-            return array_t{std::move(type), std::vector<i64>(num_elements(type.get_shape()), value)};
+            return array_t{std::move(type), std::vector<i64>(count, value)};
             case F32:
-            return array_t{std::move(type), std::vector<f32>(num_elements(type.get_shape()), value)};
+            return array_t{std::move(type), std::vector<f32>(count, value)};
             case F64:
-            return array_t{std::move(type), std::vector<f64>(num_elements(type.get_shape()), value)};
+            return array_t{std::move(type), std::vector<f64>(count, value)};
             case BOOL:
-            return array_t{std::move(type), std::vector<b8>(num_elements(type.get_shape()), value)};
+            return array_t{std::move(type), std::vector<b8>(count, value)};
             default:
             return array_t{0};
         }

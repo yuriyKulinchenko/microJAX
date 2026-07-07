@@ -105,11 +105,24 @@ jaxpr_tracer jaxpr_tracer::switch_on(
 
     std::vector<expression> branch_expressions = std::apply(get_branch_expressions, branches);
 
-    // TODO: for now, I will assume that all branch expressions return the same type
 
     if (branch_expressions.size() == 0) {
         throw std::logic_error("Error: expect at least one branch in switch expression");
     }
+
+    auto& outvals = branch_expressions[0].outvals;
+
+    for (size_t i = 1; i < branch_expressions.size(); i++) {
+        // Outputs have to match:
+        auto& branch_expression = branch_expressions[i];
+        for (size_t j = 0; j < branch_expression.outvals.size(); j++) {
+            if (outvals[j].get_type() != branch_expression.outvals[j].get_type()) {
+                throw std::logic_error(
+                    "Error: expect outputs to have consistent type signature in branches");
+            }
+        }
+    }
+
 
     var_t output_var {builder.jaxpr.new_var_id(),
         branch_expressions[0].equations[0].get_output(0).get_type()};
