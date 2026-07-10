@@ -451,6 +451,7 @@ public:
     [[nodiscard]] const var_t& get_output(size_t i) const;
     [[nodiscard]] primitive_op get_op() const;
     [[nodiscard]] const params_variant& get_params() const;
+    [[nodiscard]] params_variant& get_params();
 
 
 private:

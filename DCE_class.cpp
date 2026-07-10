@@ -43,9 +43,10 @@ void DCE_class::apply_dead_code_elimination() {
         // Step 1: determine whether the equation should be kept,
         // based on whether it contains an output in used_ids:
 
+        auto& equation = equations[i];
         bool keep_equation = false;
 
-        for (auto& output: equations[i].get_output()) {
+        for (auto& output: equation.get_output()) {
             if (used_ids.contains(output.get_id())) {
                 keep_equation = true;
                 keep[i] = true;
@@ -57,9 +58,22 @@ void DCE_class::apply_dead_code_elimination() {
         // into used_ids:
 
         if (!keep_equation) continue;
-        for (auto& input: equations[i].get_input()) {
+        for (auto& input: equation.get_input()) {
             if (input.is<literal_t>()) continue;
             used_ids.insert(input.get_var().get_id());
+        }
+
+        // Step 3: if the equation has children, recursively apply DCE:
+
+        switch (equation.get_op()) {
+            using enum primitive_op;
+            case COND: {
+                for (auto& expr: std::get<cond_params>(equation.get_params()).branches) {
+                    expr.eliminate_dead_code();
+                }
+                break;
+            }
+            default:
         }
     }
 

@@ -154,8 +154,6 @@ value promote(const value& val, dtype_t dtype, jaxpr_builder& builder) {
     return val;
 }
 
-#include "jax_logger.h"
-
 value array_value(const array_t& array, jaxpr_builder& builder) {
     if (const std::optional<literal_t> literal = array.get_literal()) {
         return value{*literal};

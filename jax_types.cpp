@@ -1,5 +1,4 @@
 #include "jax_types.h"
-
 #include "DCE_class.h"
 
 namespace jax {
@@ -285,6 +284,12 @@ primitive_op equation::get_op() const {
 const params_variant& equation::get_params() const {
     return params;
 }
+
+params_variant& equation::get_params() {
+    return params;
+}
+
+
 
 
 equation::equation(std::vector<value> input, std::vector<var_t> output, primitive_op op):
