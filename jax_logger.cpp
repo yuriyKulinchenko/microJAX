@@ -54,12 +54,23 @@ std::ostream& operator<<(std::ostream& stream, const array_t& array) {
     }, array.get_value());
 }
 
+std::ostream& operator<<(std::ostream& stream, const literal_t& literal) {
+    std::visit([&](auto& x) {
+        stream << x;
+    }, literal.get_value());
+    return stream;
+}
+
 std::ostream& emit_typed_var(std::ostream& stream, const var_t& var) {
     return stream << var << ':' << var.get_type();
 }
 
 std::ostream& emit_typed_array(std::ostream& stream, const array_t& array) {
     return stream << array << ':' << array.get_type();
+}
+
+std::ostream& emit_typed_literal(std::ostream& stream, const literal_t& literal) {
+    return stream << literal << ':' << to_lower(to_string(literal.get_dtype())) << "[]";
 }
 
 // <var>':'<type>* '=' <op> (<var> | <array>':'<type>)
@@ -69,9 +80,9 @@ std::ostream& emit_value_vector(std::ostream& stream,
     const std::vector<value>& values, const char* separator) {
     for (int i = 0; i < values.size(); i++) {
         const value& val = values[i];
-        if (val.is<array_t>()) {
-            const array_t& array = val.get_array();
-            emit_typed_array(stream, array);
+        if (val.is<literal_t>()) {
+            const literal_t& literal = val.get_literal();
+            emit_typed_literal(stream, literal);
         } else {
             // var_t
             stream << val.get_var();
@@ -169,6 +180,14 @@ std::ostream& emit_expr(std::ostream& stream, const expression& expr, size_t tab
 
     stream << space << "{\n";
     stream << space << "    " << "lambda ";
+
+    for (size_t i = 0; i < expr.constvars.size(); i++) {
+        auto& var = expr.constvars[i];
+        emit_typed_var(stream, var);
+        if (i != expr.constvars. size() - 1) stream << ", ";
+    }
+
+    stream << "; ";
 
     for (size_t i = 0; i < expr.invars.size(); i++) {
         auto& var = expr.invars[i];

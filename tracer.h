@@ -34,6 +34,8 @@ public:
     BINARY_OP(<); BINARY_OP(<=);
     BINARY_OP(>); BINARY_OP(>=);
 
+#undef BINARY_OP
+
     [[nodiscard]] jaxpr_tracer sin() const;
     [[nodiscard]] jaxpr_tracer cos() const;
     [[nodiscard]] jaxpr_tracer exp() const;
@@ -66,7 +68,7 @@ public:
     jaxpr_tracer register_tracer(jax::type_t type);
     void register_output(const jaxpr_tracer& tracer);
     void register_output(const jax::value& value);
-    void register_output(const jax::array_t& array);
+    void register_output(const jax::literal_t& literal);
     void register_output(const jax::var_t& var);
 
 
@@ -76,7 +78,6 @@ public:
     }
 
     [[nodiscard]] jax::expression&& get_jaxpr();
-
     jax::expression jaxpr;
 };
 

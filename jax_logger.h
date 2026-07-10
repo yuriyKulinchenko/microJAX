@@ -7,9 +7,11 @@
 std::ostream& operator<<(std::ostream& stream, const jax::type_t& type);
 std::ostream& operator<<(std::ostream& stream, const jax::var_t& var);
 std::ostream& operator<<(std::ostream& stream, const jax::array_t& array);
+std::ostream& operator<<(std::ostream& stream, const jax::literal_t& literal);
 
 std::ostream& emit_typed_var(std::ostream& stream, const jax::var_t& var);
 std::ostream& emit_typed_array(std::ostream& stream, const jax::array_t& array);
+std::ostream& emit_typed_literal(std::ostream& stream, const jax::literal_t& literal);
 
 std::ostream& emit_value_vector(std::ostream& stream,
     const std::vector<jax::value>& values, const char* separator);

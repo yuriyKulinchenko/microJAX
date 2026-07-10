@@ -177,6 +177,18 @@ vector_variant &array_t::get_value() {
     return value;
 }
 
+std::optional<literal_t> array_t::get_literal() const {
+    if (type.get_shape().size() != 0) return std::nullopt;
+    switch (const dtype_t dtype = type.get_dtype()) {
+        using enum dtype_t;
+        case I32: return literal_t{dtype, std::get<std::vector<i32>>(value)[0]};
+        case I64: return literal_t{dtype, std::get<std::vector<i64>>(value)[0]};
+        case F32: return literal_t{dtype, std::get<std::vector<f32>>(value)[0]};
+        case F64: return literal_t{dtype, std::get<std::vector<f64>>(value)[0]};
+        default: return literal_t{dtype, std::get<std::vector<b8>>(value)[0]};
+    }
+}
+
 const type_span& array_span::get_type() const {
     return type;
 }
@@ -209,19 +221,45 @@ void array_t::check_single_value() {
     }, value);
 }
 
-value::value(array_t array): variant_(std::move(array)) {}
-value::value(var_t var): variant_(std::move(var)) {}
-
-const type_t& value::get_type() const {
-    return std::visit([](auto& v) -> const type_t& {return v.get_type();}, variant_);
+dtype_t literal_t::get_dtype() const {
+    return dtype;
 }
 
-const array_t& value::get_array() const {
-    return std::get<array_t>(variant_);
+const value_variant &literal_t::get_value() const {
+    return value;
+}
+
+const std::vector<size_t> &literal_t::get_shape() {
+    return shape;
+}
+
+value::value(literal_t literal): variant_(std::move(literal)) {}
+value::value(var_t var): variant_(std::move(var)) {}
+
+const literal_t& value::get_literal() const {
+    return std::get<literal_t>(variant_);
 }
 
 const var_t& value::get_var() const {
     return std::get<var_t>(variant_);
+}
+
+dtype_t value::get_dtype() const {
+    return std::visit([](auto& x){return x.get_dtype();}, variant_);
+}
+
+const std::vector<size_t> &value::get_shape() const {
+    if (is<var_t>()) {
+        return std::get<var_t>(variant_).get_shape();
+    }
+    return literal_t::get_shape();
+}
+
+type_t value::get_type() const {
+    if (is<var_t>()) {
+        return std::get<var_t>(variant_).get_type();
+    }
+    return type_t{std::get<literal_t>(variant_).get_dtype(), literal_t::get_shape()};
 }
 
 const std::vector<value> &equation::get_input() const {
@@ -262,8 +300,12 @@ op(op),
 params(params)
 {}
 
-void expression::add_input(var_t var) {
+void expression::add_invar(var_t var) {
     invars.push_back(std::move(var));
+}
+
+void expression::add_constvar(var_t var) {
+    constvars.push_back(std::move(var));
 }
 
 void expression::add_output(value val) {
@@ -272,6 +314,10 @@ void expression::add_output(value val) {
 
 void expression::add_equation(equation eq) {
     equations.push_back(std::move(eq));
+}
+
+var_t expression::fresh_var(type_t type) {
+    return var_t{new_var_id(), std::move(type)};
 }
 
 size_t expression::new_var_id() {

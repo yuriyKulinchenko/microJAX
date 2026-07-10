@@ -24,10 +24,13 @@ int main() {
     auto j = builder.register_tracer(I32);
     auto x = builder.register_tracer(F32, 2, 2);
     auto y = builder.register_tracer(F64, 2, 2);
+    auto k = array_t::build<f32>({4, 2, 2}, [](auto& is) {
+        return static_cast<f32>(is[0] + is[1] + is[2]);
+    });
 
     auto z = switch_on(i < j, std::tuple{
-        [](auto& x, auto& y){return x + y;},
-        [](auto& x, auto& y){return x * y;}
+        [&](auto& x, auto& y){return x + y - k;},
+        [&](auto& x, auto& y){return x * y * k;}
     }, x, y);
 
     builder.register_output(reduce_sum(z, {0, 1}));

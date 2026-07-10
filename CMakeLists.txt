@@ -16,4 +16,5 @@ add_executable(microJAX main.cpp
         grad.h
         grad.cpp
         DCE_class.cpp
-        DCE_class.h)
+        DCE_class.h
+        jax_format.h)

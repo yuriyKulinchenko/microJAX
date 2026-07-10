@@ -95,10 +95,12 @@ private:
 
 #define check_type(T_real, T_enum)                          \
 if constexpr (std::is_same_v<T, T_real>) {                  \
-    if(type.get_dtype() != dtype_t::T_enum) {         \
+    if(type.get_dtype() != dtype_t::T_enum) {               \
         throw std::logic_error("Error: type mismatch");     \
     }                                                       \
 }
+
+using value_variant = std::variant<i32, i64, f32, f64, b8>;
 
 using vector_variant = std::variant<
     std::vector<i32>, std::vector<i64>,
@@ -144,6 +146,30 @@ switch (type.get_dtype()) {                     \
     default: return 0;                          \
 }
 
+
+class literal_t {
+public:
+    literal_t(const dtype_t dtype, auto x): dtype(dtype) {
+        switch (dtype) {
+            using enum dtype_t;
+            case I32: value = static_cast<i32>(x); break;
+            case I64: value = static_cast<i64>(x); break;
+            case F32: value = static_cast<f32>(x); break;
+            case F64: value = static_cast<f64>(x); break;
+            case BOOL: value = static_cast<b8>(x); break;
+        }
+    }
+
+    [[nodiscard]] dtype_t get_dtype() const;
+    [[nodiscard]] const value_variant& get_value() const;
+    [[nodiscard]] static const std::vector<size_t>& get_shape();
+
+private:
+    dtype_t dtype;
+    value_variant value;
+    inline static std::vector<size_t> shape = {};
+};
+
 class array_t {
 public:
     friend class array_span;
@@ -166,8 +192,25 @@ public:
     }
 
     template<typename T>
-    static array_t build(type_t type, invocable_r<T, const std::vector<size_t>&> auto f) {
+    static array_t build(std::vector<size_t> shape, invocable_r<T, const std::vector<size_t>&> auto f) {
         // f takes the std::vector
+
+        dtype_t dtype;
+        using enum dtype_t;
+        if constexpr (std::is_same_v<T, i32>) {
+            dtype = I32;
+        } else if constexpr(std::is_same_v<T, i64>) {
+            dtype = I64;
+        } else if constexpr(std::is_same_v<T, f32>) {
+            dtype = F32;
+        } else if constexpr(std::is_same_v<T, f64>) {
+            dtype = F64;
+        } else {
+            dtype = BOOL;
+        }
+
+        type_t type {dtype, std::move(shape)};
+
         const auto& shape_vector = type.get_shape();
         auto index_vector = std::vector<size_t>(type.get_shape().size(), 0);
         auto output_vector = std::vector<T>(num_elements(type.get_shape()));
@@ -186,8 +229,7 @@ public:
         return array_t{std::move(type), output_vector};
     }
 
-    template<typename T>
-    static array_t build_fill(type_t type, T value) {
+    static array_t build_fill(type_t type, auto value) {
         size_t count = num_elements(type.get_shape());
         switch (type.get_dtype()) {
             using enum dtype_t;
@@ -236,6 +278,7 @@ public:
     [[nodiscard]] const type_t& get_type() const;
     [[nodiscard]] const vector_variant& get_value() const;
     [[nodiscard]] vector_variant& get_value();
+    [[nodiscard]] std::optional<literal_t> get_literal() const;
 
     bool has_single_value(const f64 val) const {
         return has_single_value_ && val == single_value;
@@ -290,11 +333,11 @@ public:
         }, array.value);
     }
 
-    std::variant<i32, i64, f32, f64, b8> operator[](std::same_as<size_t> auto... indices) const {
+    value_variant operator[](std::same_as<size_t> auto... indices) const {
         ACCESS_DISPATCH(indices...)
     }
 
-    std::variant<i32, i64, f32, f64, b8> operator[](const std::vector<size_t>& indices) const {
+    value_variant operator[](const std::vector<size_t>& indices) const {
         ACCESS_DISPATCH(indices)
     }
 
@@ -324,7 +367,7 @@ private:
 
 class value {
 public:
-    explicit value(array_t array);
+    explicit value(literal_t literal);
     explicit value(var_t var);
 
     template<typename T>
@@ -332,12 +375,19 @@ public:
         return std::holds_alternative<T>(variant_);
     }
 
-    [[nodiscard]] const type_t& get_type() const;
-    [[nodiscard]] const array_t& get_array() const;
+    // Types are NOT returned by const&, as in the event that
+    // the value is a literal, it does not have an underlying
+    // type_t. It only has a dtype_t, so the whole type_t has
+    // to be created from scratch.
+
+    [[nodiscard]] const literal_t& get_literal() const;
     [[nodiscard]] const var_t& get_var() const;
+    [[nodiscard]] dtype_t get_dtype() const;
+    [[nodiscard]] const std::vector<size_t>& get_shape() const;
+    [[nodiscard]] type_t get_type() const;
 
 private:
-   std::variant<array_t, var_t> variant_;
+   std::variant<literal_t, var_t> variant_;
 };
 
 struct implicit_broadcast_result {
@@ -411,14 +461,18 @@ private:
 };
 
 struct expression {
+    std::vector<var_t> constvars;
     std::vector<var_t> invars;
     std::vector<value> outvals;
     std::vector<equation> equations;
+    std::vector<array_t> consts;
     size_t var_id = 0;
 
-    void add_input(var_t var);
+    void add_constvar(var_t var);
+    void add_invar(var_t var);
     void add_output(value val);
     void add_equation(equation eq);
+    var_t fresh_var(type_t type);
 
     void eliminate_dead_code();
 

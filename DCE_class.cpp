@@ -34,7 +34,7 @@ void DCE_class::apply_dead_code_elimination() {
     std::unordered_set<size_t> used_ids {};
 
     for (auto& val: input_expr.outvals) {
-        if (val.is<array_t>()) continue;
+        if (val.is<literal_t>()) continue;
         used_ids.insert(val.get_var().get_id());
     }
 
@@ -58,7 +58,7 @@ void DCE_class::apply_dead_code_elimination() {
 
         if (!keep_equation) continue;
         for (auto& input: equations[i].get_input()) {
-            if (input.is<array_t>()) continue;
+            if (input.is<literal_t>()) continue;
             used_ids.insert(input.get_var().get_id());
         }
     }

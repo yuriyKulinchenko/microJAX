@@ -49,7 +49,6 @@ var_t grad_class::fresh_var(type_t type) {
     return var_t{output_expr.new_var_id(), std::move(type)};
 }
 
-
 void grad_class::introduce_adjoint(const var_t& var) {
     /*
     For each intermediate value in the calculation, an adjoint
@@ -78,25 +77,24 @@ value *grad_class::get_adjoint(const var_t& var) {
 }
 
 bool grad_class::adjoint_is_active(const var_t& var, bool apply_update) {
-    auto it = active_adjoint_map.find(var.get_id());
+    const auto it = active_adjoint_map.find(var.get_id());
     if (it->second) return true;
     if (apply_update) it->second = true;
     return false;
 }
 
 void grad_class::update_adjoint(const var_t& input_adj_var, const value& product_val) {
-    // First, check if product is zero:
-    if (product_val.is<array_t>()) {
-        if (product_val.get_array().has_single_value(0)) {
-            return;
-        }
-    }
+    // update_adjoint no longer checks if the input is zero
 
-    // Case 1: input_adj does not yet exist:
+    // Case 1: input_adj is tied to a constvar:
+    if (!active_adjoint_map.contains(input_adj_var.get_id())) return;
+
+
+    // Case 2: input_adj does not yet exist:
     if (!adjoint_is_active(input_adj_var)) {
-        variable_adjoint_map.insert_or_assign(input_adj_var.get_id(), value{product_val});
+        variable_adjoint_map.insert_or_assign(input_adj_var.get_id(), product_val);
     } else {
-        // Case 2: it does exist - sum is required:
+        // Case 3: it does exist - sum is required:
         auto sum_var = var_t{output_expr.new_var_id(), product_val.get_type()};
         const auto& input_adj = *get_adjoint(input_adj_var);
 
@@ -117,67 +115,43 @@ void grad_class::update_adjoint(
     const value& f_prime_val,
     const value& adjoint_val) {
 
-    bool f_prime_is_array = f_prime_val.is<array_t>();
-    bool adjoint_is_array = adjoint_val.is<array_t>();
+    auto product_var = fresh_var(input_adj_var.get_type());
 
-    if (f_prime_is_array && adjoint_is_array) {
-        // Fold constant:
-        array_t product = f_prime_val.get_array() * adjoint_val.get_array();
-        if (product.has_single_value(0)) return;
-        update_adjoint(input_adj_var, value{std::move(product)});
-    } else if (f_prime_is_array) {
-        const array_t& f_prime = f_prime_val.get_array();
-        if (f_prime.has_single_value(0)) {
-            // If f_prime is 0, return early
-            return;
+    output_expr.equations.emplace_back(
+        std::vector{f_prime_val, adjoint_val},
+        std::vector{product_var},
+        primitive_op::MUL
+    );
+
+    update_adjoint(input_adj_var, value{product_var});
+}
+
+value grad_class::negate(const value& val) {
+    if (val.is<literal_t>()) {
+        auto& literal = val.get_literal();
+        dtype_t dtype = literal.get_dtype();
+        switch (dtype) {
+            using enum dtype_t;
+            case I32: return value{literal_t(dtype, i32{-std::get<i32>(literal.get_value())})};
+            case I64: return value{literal_t(dtype, i64{-std::get<i64>(literal.get_value())})};
+            case F32: return value{literal_t(dtype, f32{-std::get<f32>(literal.get_value())})};
+            case F64: return value{literal_t(dtype, f64{-std::get<f64>(literal.get_value())})};
+            default: throw std::logic_error{"Error: cannot negate boolean"};
         }
-        if (f_prime.has_single_value(1)) {
-            // If f_prime is 1, only propagate the adjoint
-            update_adjoint(input_adj_var, adjoint_val);
-        } else if (f_prime.has_single_value(-1)) {
-            // If f_prime is -1, apply negation
-            auto negated_var = fresh_var(input_adj_var.get_type());
-            output_expr.equations.emplace_back(
-                std::vector{adjoint_val},
-                std::vector{negated_var},
-                primitive_op::NEG
-            );
-            update_adjoint(input_adj_var, value{negated_var});
-        } else {
-            // Otherwise, actually multiply
-            update_adjoint(input_adj_var, f_prime_val, adjoint_val);
-        }
-
-    } else if (adjoint_is_array) {
-        const array_t& adjoint = adjoint_val.get_array();
-        if (adjoint.has_single_value(0)) {
-            return;
-        }
-        if (adjoint.has_single_value(1)) {
-            update_adjoint(input_adj_var, f_prime_val);
-        } else if (adjoint.has_single_value(-1)) {
-            auto negated_var = fresh_var(input_adj_var.get_type());
-            output_expr.equations.emplace_back(
-                std::vector{f_prime_val},
-                std::vector{negated_var},
-                primitive_op::NEG
-            );
-            update_adjoint(input_adj_var, value{negated_var});
-        } else {
-            update_adjoint(input_adj_var, f_prime_val, adjoint_val);
-        }
-
-    } else {
-        auto product_var = fresh_var(input_adj_var.get_type());
-
-        output_expr.equations.emplace_back(
-            std::vector{f_prime_val, adjoint_val},
-            std::vector{product_var},
-            primitive_op::MUL
-        );
-
-        update_adjoint(input_adj_var, value{product_var});
     }
+
+    // val is a var_t - emit a negation:
+
+    auto& var = val.get_var();
+    var_t negated_var = fresh_var(var.get_type());
+
+    output_expr.equations.emplace_back(
+        std::vector{val},
+        std::vector{negated_var},
+        primitive_op::NEG
+    );
+
+    return value{negated_var};
 }
 
 bool all_inputs_constant(const std::vector<value>& inputs) {
@@ -282,9 +256,7 @@ void grad_class::propagate_adjoints(const equation& eq) {
             if (!output_adj) break;
 
             auto& input_var = eq.get_input(0).get_var();
-            auto f_prime = array_t::build_fill(output_var.get_type(), -1); // -1
-
-            update_adjoint(input_var, value{f_prime}, *output_adj);
+            update_adjoint(input_var, negate(*output_adj));
 
             break;
         }
@@ -316,7 +288,7 @@ void grad_class::propagate_adjoints(const equation& eq) {
             // z = x - y
             // x' += dL/dz dz/dx
             // dz/dx = 1 => x' += z'
-            // Similarly, y' += -1 * z'
+            // Similarly, y' += -z'
 
             auto& output_var = eq.get_output(0);
             auto* output_adj = get_adjoint(output_var);
@@ -330,8 +302,7 @@ void grad_class::propagate_adjoints(const equation& eq) {
             }
 
             if (y_val.is<var_t>()) {
-                update_adjoint(y_val.get_var(),
-                    value{array_t::build_fill(y_val.get_type(), -1)}, *output_adj);
+                update_adjoint(y_val.get_var(), negate(*output_adj));
             }
             break;
         }
@@ -375,22 +346,15 @@ void grad_class::propagate_adjoints(const equation& eq) {
             auto& y_val = eq.get_input(1);
 
             if (x_val.is<var_t>()) {
-                if (y_val.is<array_t>() && y_val.get_array().has_single_value(1)) {
+                auto quotient_val = fresh_var(x_val.get_type());
 
-                    // If y_val is a 1 vector, the division can be omitted
+                output_expr.equations.emplace_back(
+                    std::vector{*output_adj, y_val},
+                    std::vector{quotient_val},
+                    DIV
+                );
 
-                    update_adjoint(x_val.get_var(), *output_adj);
-                } else {
-                    auto quotient_val = fresh_var(x_val.get_type());
-
-                    output_expr.equations.emplace_back(
-                        std::vector{*output_adj, y_val},
-                        std::vector{quotient_val},
-                        DIV
-                    );
-
-                    update_adjoint(x_val.get_var(), value{quotient_val});
-                }
+                update_adjoint(x_val.get_var(), value{quotient_val});
             }
 
             // dz/dy = - x / (y * y) => y' += z' * neg(z/y)
@@ -423,14 +387,8 @@ void grad_class::propagate_adjoints(const equation& eq) {
             auto* output_adj = get_adjoint(output_var);
             if (!output_adj) break;
 
-            // If output_adj is 0, there will be no contribution to the adjoint:
-            if (output_adj->is<array_t>()) {
-                auto& output_adj_array = output_adj->get_array();
-                if (output_adj_array.has_single_value(0)) break;
-            }
-
             auto& input_val = eq.get_input(0);
-            if (input_val.is<array_t>()) break;
+            if (input_val.is<literal_t>()) break;
             auto& input_var = input_val.get_var();
 
             // The adjoint is a broadcast of the output_adj
@@ -470,14 +428,8 @@ void grad_class::propagate_adjoints(const equation& eq) {
             auto* output_adj = get_adjoint(output_var);
             if (!output_adj) break;
 
-            // If output_adj is 0, there will be no contribution to the adjoint:
-            if (output_adj->is<array_t>()) {
-                auto& output_adj_array = output_adj->get_array();
-                if (output_adj_array.has_single_value(0)) break;
-            }
-
             auto& input_val = eq.get_input(0);
-            if (input_val.is<array_t>()) break;
+            if (input_val.is<literal_t>()) break;
             auto& input_var = input_val.get_var();
 
             // The adjoint is a summation over the newly added ranks
@@ -563,14 +515,16 @@ void grad_class::propagate_adjoints(const equation& eq) {
 
         case DOT_GENERAL: {
 
+            // dot_general no longer has to support literals:
+
             auto& output_var = eq.get_output(0);
             auto* output_adj = get_adjoint(output_var);
             if (!output_adj) break;
 
-            auto& x_val = eq.get_input(0);
-            auto& y_val = eq.get_input(1);
-            auto& x_shape = x_val.get_type().get_shape();
-            auto& y_shape = y_val.get_type().get_shape();
+            auto& x_var = eq.get_input(0).get_var();
+            auto& y_var = eq.get_input(1).get_var();
+            auto& x_shape = x_var.get_type().get_shape();
+            auto& y_shape = y_var.get_type().get_shape();
 
             const auto& params = std::get<dot_general_params>(eq.get_params());
 
@@ -636,82 +590,78 @@ void grad_class::propagate_adjoints(const equation& eq) {
                 return inverse_permutation;
             };
 
-            if (x_val.is<var_t>()) {
-                auto& x_var = x_val.get_var();
 
-                std::vector<size_t> inverse_permutation =
-                    get_inverse_permutation(params.left_batch, params.left_contract, free_indices_x);
+            std::vector<size_t> inverse_permutation =
+                get_inverse_permutation(params.left_batch, params.left_contract, free_indices_x);
 
-                type_t new_type {x_var.get_type().get_dtype(), permute(x_shape, inverse_permutation)};
+            type_t new_type {x_var.get_type().get_dtype(), permute(x_shape, inverse_permutation)};
 
-                auto dot_general_x = fresh_var(std::move(new_type));
+            auto dot_general_x = fresh_var(std::move(new_type));
+
+            output_expr.equations.emplace_back(
+                std::vector{value{y_var}, *output_adj},
+                std::vector{dot_general_x},
+                DOT_GENERAL,
+                dot_general_params{
+                    free_indices_y, std::move(free_indices_y_product),
+                    std::move(batch_indices_y), std::move(batch_indices_y_product)
+                }
+            );
+
+            // Transpose may be necessary:
+
+            if (is_identity_permutation(inverse_permutation)) {
+                update_adjoint(x_var, value{dot_general_x});
+            } else {
+                auto transpose_dot_general_x = fresh_var(x_var.get_type());
 
                 output_expr.equations.emplace_back(
-                    std::vector{y_val, *output_adj},
-                    std::vector{dot_general_x},
-                    DOT_GENERAL,
-                    dot_general_params{
-                        free_indices_y, std::move(free_indices_y_product),
-                        std::move(batch_indices_y), std::move(batch_indices_y_product)
-                    }
+                    std::vector{value{dot_general_x}},
+                    std::vector{transpose_dot_general_x},
+                    TRANSPOSE,
+                    transpose_params{invert_permutation(inverse_permutation)}
                 );
 
-                // Transpose may be necessary:
-
-                if (is_identity_permutation(inverse_permutation)) {
-                    update_adjoint(x_var, value{dot_general_x});
-                } else {
-                    auto transpose_dot_general_x = fresh_var(x_var.get_type());
-
-                    output_expr.equations.emplace_back(
-                        std::vector{value{dot_general_x}},
-                        std::vector{transpose_dot_general_x},
-                        TRANSPOSE,
-                        transpose_params{invert_permutation(inverse_permutation)}
-                    );
-
-                    update_adjoint(x_var, value{transpose_dot_general_x});
-                }
+                update_adjoint(x_var, value{transpose_dot_general_x});
             }
 
-            if (y_val.is<var_t>()) {
-                auto& y_var = y_val.get_var();
 
-                std::vector<size_t> inverse_permutation =
-                    get_inverse_permutation(params.right_batch, params.right_contract, free_indices_y);
 
-                type_t new_type {y_var.get_type().get_dtype(), permute(y_shape, inverse_permutation)};
+            inverse_permutation =
+            get_inverse_permutation(params.right_batch, params.right_contract, free_indices_y);
 
-                auto dot_general_y = fresh_var(std::move(new_type));
+            new_type = {y_var.get_type().get_dtype(), permute(y_shape, inverse_permutation)};
+
+            auto dot_general_y = fresh_var(std::move(new_type));
+
+            output_expr.equations.emplace_back(
+                std::vector{value{x_var}, *output_adj},
+                std::vector{dot_general_y},
+                DOT_GENERAL,
+                dot_general_params{
+                    std::move(free_indices_x), std::move(free_indices_x_product),
+                    std::move(batch_indices_x), std::move(batch_indices_x_product)
+                }
+            );
+
+
+            // Transpose may be necessary:
+
+            if (is_identity_permutation(inverse_permutation)) {
+                update_adjoint(y_var, value{dot_general_y});
+            } else {
+                auto transpose_dot_general_y = fresh_var(y_var.get_type());
 
                 output_expr.equations.emplace_back(
-                    std::vector{x_val, *output_adj},
-                    std::vector{dot_general_y},
-                    DOT_GENERAL,
-                    dot_general_params{
-                        std::move(free_indices_x), std::move(free_indices_x_product),
-                        std::move(batch_indices_x), std::move(batch_indices_x_product)
-                    }
+                    std::vector{value{dot_general_y}},
+                    std::vector{transpose_dot_general_y},
+                    TRANSPOSE,
+                    transpose_params{invert_permutation(inverse_permutation)}
                 );
 
-
-                // Transpose may be necessary:
-
-                if (is_identity_permutation(inverse_permutation)) {
-                    update_adjoint(y_var, value{dot_general_y});
-                } else {
-                    auto transpose_dot_general_y = fresh_var(y_var.get_type());
-
-                    output_expr.equations.emplace_back(
-                        std::vector{value{dot_general_y}},
-                        std::vector{transpose_dot_general_y},
-                        TRANSPOSE,
-                        transpose_params{invert_permutation(inverse_permutation)}
-                    );
-
-                    update_adjoint(y_var, value{transpose_dot_general_y});
-                }
+                update_adjoint(y_var, value{transpose_dot_general_y});
             }
+
             break;
         }
 
@@ -823,7 +773,7 @@ void grad_class::propagate_adjoints(const equation& eq) {
                 if (value* adjoint = get_adjoint(output_var)) {
                     inputs.push_back(*adjoint);
                 } else {
-                    inputs.push_back(value{array_t::build_fill(output_var.get_type(), 0)});
+                    inputs.push_back(broadcasted_value(output_var.get_type(), 0));
                 }
             }
 
@@ -875,8 +825,8 @@ expression grad_class::find_grad() {
 
     // TODO: array outputs should technically be allowed, with a trivial adjoint of 0
 
-    if (input_expr.outvals[0].is<array_t>()) {
-        throw std::logic_error("Error: expected output to be variable, received array");
+    if (input_expr.outvals[0].is<literal_t>()) {
+        throw std::logic_error("Error: expected output to be variable, received literal");
     }
 
     const var_t& output_var = input_expr.outvals[0].get_var();
@@ -889,10 +839,17 @@ expression grad_class::find_grad() {
         throw std::logic_error("Error: shape of output variable must be scalar");
     }
 
+    // Add constvars:
+
+    output_expr.consts = input_expr.consts;
+    for (auto& var: input_expr.constvars) {
+        output_expr.add_constvar(var);
+    }
+
     // Add inputs:
 
     for (auto& var: input_expr.invars) {
-        output_expr.add_input(var);
+        output_expr.add_invar(var);
         introduce_adjoint(var);
     }
 
@@ -907,7 +864,7 @@ expression grad_class::find_grad() {
 
     // Seed the adjoint of the initial equation:
 
-    update_adjoint(output_var, value{array_t::build_fill(output_var.get_type(), 1)});
+    update_adjoint(output_var, broadcasted_value(output_var.get_type(), 1));
 
     // perform a backward pass:
 
@@ -923,7 +880,7 @@ expression grad_class::find_grad() {
             output_expr.outvals.push_back(*val);
         } else {
             // The adjoint does not exist - replace it with 0:
-            output_expr.outvals.push_back(value{array_t::build_fill(var.get_type(), 0)});
+            output_expr.outvals.push_back(broadcasted_value(var.get_type(), 0));
         }
     }
 
@@ -933,8 +890,17 @@ expression grad_class::find_grad() {
 expression grad_class::find_grad_general() {
     // Add inputs (x0, ..., xn)
 
+    // Add constvars:
+
+    output_expr.consts = input_expr.consts;
+    for (auto& var: input_expr.constvars) {
+        output_expr.add_constvar(var);
+    }
+
+    // Add inputs (x0, ..., xn)
+
     for (auto& var: input_expr.invars) {
-        output_expr.add_input(var);
+        output_expr.add_invar(var);
         introduce_adjoint(var);
     }
 
@@ -952,9 +918,9 @@ expression grad_class::find_grad_general() {
 
     for (auto& output_val: input_expr.outvals) {
         var_t y_bar_param = fresh_var(output_val.get_type());
-        output_expr.add_input(y_bar_param);
+        output_expr.add_invar(y_bar_param);
 
-        if (output_val.is<array_t>()) continue;
+        if (output_val.is<literal_t>()) continue;
 
         auto& output_var = output_val.get_var();
         update_adjoint(output_var, value{y_bar_param});
@@ -974,7 +940,7 @@ expression grad_class::find_grad_general() {
             output_expr.outvals.push_back(*val);
         } else {
             // The adjoint does not exist - replace it with 0:
-            output_expr.outvals.push_back(value{array_t::build_fill(var.get_type(), 0)});
+            output_expr.outvals.push_back(broadcasted_value(var.get_type(), 0));
         }
     }
 

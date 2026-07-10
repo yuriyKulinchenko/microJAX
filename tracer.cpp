@@ -14,8 +14,8 @@ jaxpr_tracer elementwise_binary_op(
     jaxpr_builder& builder,
     std::optional<dtype_t> output_dtype = std::nullopt
     ) {
-    const std::vector<size_t>& left_shape = v1.get_type().get_shape();
-    const std::vector<size_t>& right_shape = v2.get_type().get_shape();
+    auto left_shape = v1.get_type().get_shape();
+    auto right_shape = v2.get_type().get_shape();
 
     dtype_t result_dtype = output_dtype.value_or(v1.get_type().get_dtype());
 
@@ -150,7 +150,23 @@ value promote(const value& val, dtype_t dtype, jaxpr_builder& builder) {
         return value {cast_var};
 
     }
+
     return val;
+}
+
+#include "jax_logger.h"
+
+value array_value(const array_t& array, jaxpr_builder& builder) {
+    if (const std::optional<literal_t> literal = array.get_literal()) {
+        return value{*literal};
+    }
+
+
+    // Otherwise, add it to the array of consts:
+    builder.jaxpr.consts.push_back(array);
+    var_t fresh_var = builder.jaxpr.fresh_var(array.get_type());
+    builder.jaxpr.constvars.push_back(fresh_var);
+    return value{std::move(fresh_var)};
 }
 
 #define ELEMENTWISE_BINARY_OP_TRACER_TRACER(op, op_name, output_dtype)                          \
@@ -167,7 +183,7 @@ jaxpr_tracer operator op (const jaxpr_tracer& t1, const jax::array_t& array) {  
     dtype_t dtype = resultant_type(t1.get_type().get_dtype(), array.get_type().get_dtype());    \
     return elementwise_binary_op(                                                               \
         promote(value{t1.var}, dtype, t1.builder),                                              \
-        promote(value{array}, dtype, t1.builder),                                               \
+        promote(array_value(array, t1.builder), dtype, t1.builder),                             \
         op_name, t1.builder, output_dtype);                                                     \
 }
 
@@ -175,7 +191,7 @@ jaxpr_tracer operator op (const jaxpr_tracer& t1, const jax::array_t& array) {  
 jaxpr_tracer operator op (const jax::array_t& array, const jaxpr_tracer& t1) {                  \
     dtype_t dtype = resultant_type(t1.get_type().get_dtype(), array.get_type().get_dtype());    \
     return elementwise_binary_op(                                                               \
-        promote(value{array}, dtype, t1.builder),                                               \
+        promote(array_value(array, t1.builder), dtype, t1.builder),                             \
         promote(value{t1.var}, dtype, t1.builder),                                              \
         op_name, t1.builder, output_dtype);                                                     \
 }
@@ -444,8 +460,8 @@ void jaxpr_builder::register_output(const value& value) {
     jaxpr.outvals.push_back(value);
 }
 
-void jaxpr_builder::register_output(const array_t& array) {
-    jaxpr.outvals.push_back(value{array});
+void jaxpr_builder::register_output(const literal_t& literal) {
+    jaxpr.outvals.push_back(value{literal});
 }
 
 void jaxpr_builder::register_output(const var_t& var) {

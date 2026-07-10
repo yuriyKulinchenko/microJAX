@@ -11,11 +11,11 @@
 
 template<typename T>
 struct ostream_formatter {
-    constexpr auto parse(std::format_parse_context& ctx) {
+    static constexpr auto parse(std::format_parse_context& ctx) {
         return ctx.begin();
     }
 
-    auto format(const T& value, std::format_context& ctx) const {
+    static auto format(const T& value, std::format_context& ctx) {
         std::ostringstream oss;
         oss << value;
         return std::format_to(ctx.out(), "{}", oss.str());
