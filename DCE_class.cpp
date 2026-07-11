@@ -73,6 +73,11 @@ void DCE_class::apply_dead_code_elimination() {
                 }
                 break;
             }
+
+            case SCAN: {
+                std::get<scan_params>(equation.get_params()).jaxpr.eliminate_dead_code();
+                break;
+            }
             default:
         }
     }

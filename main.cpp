@@ -19,11 +19,11 @@ void switch_example();
 void scan_example();
 
 int main() {
-    switch_example();
+    scan_example();
     return 0;
 }
 
-void switch_example() {
+void scan_example() {
     using namespace jax;
     using enum dtype_t;
 
@@ -50,15 +50,20 @@ void switch_example() {
         5
     );
 
-    builder.register_output(results[0]);   // final acc  : f32[3]
-    builder.register_output(results[1]);   // final cnt  : f32[]
-    builder.register_output(results[2]);   // stacked ys : f32[5, 3]
+    auto z = results[0] * results[1] - results[2]; // f32[5,3]
+    builder.register_output(reduce_sum(z, {0, 1}));
 
     auto jaxpr = builder.get_jaxpr();
-    std::cout << jaxpr;
+    std::cout << "Original expression:\n" << jaxpr;
+
+    auto grad_jaxpr = grad(jaxpr);
+    std::cout << "Grad expression:\n" << grad_jaxpr;
+
+    grad_jaxpr.eliminate_dead_code();
+    std::cout << "DCE grad expression:\n" << grad_jaxpr;
 }
 
-void scan_example() {
+void switch_example() {
      using namespace jax;
      using enum dtype_t;
      // Construct tracer:

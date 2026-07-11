@@ -159,7 +159,43 @@ bool all_inputs_constant(const std::vector<value>& inputs) {
     return true;
 }
 
-void grad_class::propagate_adjoints(const equation& eq) {
+bool grad_class::should_propagate(const std::vector<value>& input_vals,
+        const std::vector<var_t>& output_vars) {
+    // First, check if the output adjoint is non-zero,
+    // and if any of the input values are variables
+
+    bool active_adjoint_found = false;
+    for (auto& output_var: output_vars) {
+        if (adjoint_is_active(output_var, false)) {
+            active_adjoint_found = true;
+            break;
+        }
+    }
+
+    if (!active_adjoint_found) {
+        // Nothing to propagate backwards:
+        return false;
+    }
+
+    // Check if any of the input values (excluding the index) are variables:
+
+    bool input_var_exists = false;
+    for (auto& input_val: input_vals | std::views::drop(1)) {
+        if (input_val.is<var_t>()) {
+            input_var_exists = true;
+            break;
+        }
+    }
+
+    if (!input_var_exists) {
+        // Nothing to update:
+        return false;
+    }
+
+    return true;
+}
+
+void grad_class::propagate_adjoints(equation& eq) {
     // Requires knowledge of output adjoints, and shape of eq.op to dispatch over
     // If an adjoint does not exist, take it to be zero
 
@@ -715,39 +751,11 @@ void grad_class::propagate_adjoints(const equation& eq) {
         }
 
         case COND: {
-            auto& output_vars = eq.get_output();
             auto& input_vals = eq.get_input();
+            auto& output_vars = eq.get_output();
 
-            // First, check if the output adjoint is non-zero,
-            // and if any of the input values are variables
+            if (!should_propagate(input_vals, output_vars)) break;
 
-            bool active_adjoint_found = false;
-            for (auto& output_var: output_vars) {
-                if (adjoint_is_active(output_var, false)) {
-                    active_adjoint_found = true;
-                    break;
-                }
-            }
-
-            if (!active_adjoint_found) {
-                // Nothing to propagate backwards:
-                break;
-            }
-
-            // Check if any of the input values (excluding the index) are variables:
-
-            bool input_var_exists = false;
-            for (auto& input_val: input_vals | std::views::drop(1)) {
-                if (input_val.is<var_t>()) {
-                    input_var_exists = true;
-                    break;
-                }
-            }
-
-            if (!input_var_exists) {
-                // Nothing to update:
-                break;
-            }
 
             // Goal is to compute:
             // cond(i, f'0,...,f'm)(x0,...,xn,y'0,...,y'k)
@@ -804,6 +812,130 @@ void grad_class::propagate_adjoints(const equation& eq) {
             break;
         }
 
+        case SCAN: {
+            auto& input_vals = eq.get_input();
+            auto& output_vars = eq.get_output();
+
+            if (!should_propagate(input_vals, output_vars)) break;
+
+            // On a high level, the adjoint update will require emitting:
+            // scan(f', reverse=true)(c', C, X, Y')
+            // where c' is a carry, and C, X and Y are xs parameters.
+            // this will require some re-arrangement of the parameters in f'
+
+            auto& params = std::get<scan_params>(eq.get_params());
+            expression f_prime = grad_general(params.jaxpr);
+
+            // Now, the inputs to f_prime need to be re-arranged.
+            // They will be in the form f'(c, x, c', y')
+            // They need to be in the form f(c', c, x, y')
+
+            size_t num_carry = params.num_carry;
+            size_t num_xs = eq.get_input().size() - num_carry;
+            size_t num_ys = eq.get_output().size() - num_carry;
+
+            std::vector<var_t> permuted_invars {};
+            permuted_invars.reserve(f_prime.invars.size());
+
+            size_t offset = num_carry + num_xs;
+            for (size_t i = 0; i < num_carry; i++) {
+                permuted_invars.push_back(std::move(f_prime.invars[offset + i]));
+                // f(c')
+            }
+
+            offset = 0;
+            for (size_t i = 0; i < num_carry; i++) {
+                permuted_invars.push_back(std::move(f_prime.invars[offset + i]));
+                // f(c', c)
+            }
+
+            offset = num_xs;
+            for (size_t i = 0; i < num_xs; i++) {
+                permuted_invars.push_back(std::move(f_prime.invars[offset + i]));
+                // f(c', c, x)
+            }
+
+            offset = 2 * num_carry + num_xs;
+            for (size_t i = 0; i < num_ys; i++) {
+                permuted_invars.push_back(std::move(f_prime.invars[offset + i]));
+                // f(c', c, x, y)
+            }
+
+            f_prime.invars = permuted_invars;
+
+            // Now that f_prime is constructed, the inputs and outputs need to be found in the right order
+            // The inputs will be (c', C, X, Y').
+            // c', X and Y' are easily recoverable as output adjoints or inputs.
+            // However, C will require performing the scan_carry_transform, which changes the signature
+            // from (c, X) -> (c, Y) to (c, X) -> (c, Y, C):
+
+            scan_carry_transform(eq);
+
+            std::vector<value> inputs{};
+
+            // First goal is to pass all c adjoints:
+            for (size_t i = 0; i < num_carry; i++) {
+                auto& c_var = eq.get_output(i);
+                if (value* c_adjoint = get_adjoint(c_var)) {
+                    inputs.push_back(*c_adjoint);
+                } else {
+                    inputs.push_back(broadcasted_value(c_var.get_type(), 0));
+                }
+            }
+
+            // Pass C:
+            for (size_t i = 0; i < num_carry; i++) {
+                auto& C = eq.get_output(num_carry + num_ys + i);
+                inputs.push_back(value{C});
+            }
+
+            // Pass X:
+            for (size_t i = 0; i < num_xs; i++) {
+                auto& X = eq.get_input(num_carry + i);
+                inputs.push_back(X);
+            }
+
+            // Pass Y':
+            for (size_t i = 0; i < num_ys; i++) {
+                auto& y_var = eq.get_output(num_carry + i);
+                if (value* y_adjoint = get_adjoint(y_var)) {
+                    inputs.push_back(*y_adjoint);
+                } else {
+                    inputs.push_back(broadcasted_value(y_var.get_type(), 1));
+                }
+            }
+
+            // The output will be updates to (c_0', X')
+
+            std::vector<var_t> outputs {};
+            for (auto& inval: eq.get_input()) {
+                outputs.push_back(fresh_var(inval.get_type()));
+            }
+
+            output_expr.equations.emplace_back(
+                std::move(inputs),
+                std::move(outputs),
+                SCAN,
+                scan_params{
+                    .jaxpr = f_prime,
+                    .length = params.length,
+                    .num_carry = params.num_carry,
+                    .reverse = !params.reverse
+                }
+            );
+
+            auto& updates = output_expr.equations[output_expr.equations.size() - 1].get_output();
+
+            // Update adjoints:
+
+            for (size_t i = 0; i < input_vals.size(); i++) {
+                if (!input_vals[i].is<var_t>()) continue;
+                update_adjoint(input_vals[i].get_var(), value{updates[i]});
+            }
+
+            break;
+        }
+
         case EQ:
         case NE:
         case LT:
@@ -818,12 +950,42 @@ void grad_class::propagate_adjoints(const equation& eq) {
     }
 }
 
+void grad_class::scan_carry_transform(equation& eq) {
+    // If the equation is a scan, the type signature has to be modified
+    // scan(f)(c, X) = (c, Y)
+    // scan-carry(f)(c, X) = (c, Y, C)
+
+    auto& params = std::get<scan_params>(eq.get_params());
+    auto& jaxpr = params.jaxpr;
+
+    // Fetch the first 'num_carry' inputs to expr, push them to the output
+
+    for (size_t i = 0; i < params.num_carry; i++) {
+        jaxpr.outvals.push_back(value{jaxpr.invars[i]});
+    }
+
+    // Modify the set of output variables:
+    for (size_t i = 0; i < params.num_carry; i++) {
+        auto& type = jaxpr.invars[i].get_type();
+        std::vector new_shape {params.length};
+        new_shape.reserve(type.get_shape().size() + 1);
+
+        for (size_t x: type.get_shape()) {
+            new_shape.push_back(x);
+        }
+
+        eq.get_output().push_back(
+            fresh_var(type_t{type.get_dtype(), std::move(new_shape)})
+        );
+    }
+}
+
 expression grad_class::find_grad() {
     if (input_expr.outvals.size() != 1) {
         throw formatted_error("Error: expected 1 output, received {}", input_expr.outvals.size());
     }
 
-    // TODO: array outputs should technically be allowed, with a trivial adjoint of 0
+    // TODO: literal outputs should technically be allowed, with a trivial adjoint of 0
 
     if (input_expr.outvals[0].is<literal_t>()) {
         throw std::logic_error("Error: expected output to be variable, received literal");
@@ -868,7 +1030,8 @@ expression grad_class::find_grad() {
 
     // perform a backward pass:
 
-    for (auto& eq: input_expr.equations | std::views::reverse) {
+    for (size_t i = output_expr.equations.size(); i--> 0;) {
+        auto& eq = output_expr.equations[i];
         propagate_adjoints(eq);
     }
 
@@ -928,7 +1091,8 @@ expression grad_class::find_grad_general() {
 
     // perform a backward pass:
 
-    for (auto& eq: input_expr.equations | std::views::reverse) {
+    for (size_t i = output_expr.equations.size(); i--> 0;) {
+        auto& eq = output_expr.equations[i];
         propagate_adjoints(eq);
     }
 

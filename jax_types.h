@@ -412,7 +412,7 @@ struct expression {
     void add_constvar(var_t var);
     void add_invar(var_t var);
     void add_output(value val);
-    void add_equation(equation eq);
+    equation& add_equation(equation eq);
     var_t fresh_var(type_t type);
 
     void eliminate_dead_code();
@@ -477,6 +477,11 @@ public:
     [[nodiscard]] const var_t& get_output(size_t i) const;
     [[nodiscard]] primitive_op get_op() const;
     [[nodiscard]] const params_variant& get_params() const;
+
+    [[nodiscard]] std::vector<value>& get_input();
+    [[nodiscard]] std::vector<var_t>& get_output();
+    [[nodiscard]] value& get_input(size_t i);
+    [[nodiscard]] var_t& get_output(size_t i);
     [[nodiscard]] params_variant& get_params();
 
 

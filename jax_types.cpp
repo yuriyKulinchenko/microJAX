@@ -265,7 +265,15 @@ const std::vector<value> &equation::get_input() const {
     return input;
 }
 
+std::vector<value> &equation::get_input() {
+    return input;
+}
+
 const std::vector<var_t> &equation::get_output() const {
+    return output;
+}
+
+std::vector<var_t> &equation::get_output() {
     return output;
 }
 
@@ -273,7 +281,15 @@ const value &equation::get_input(size_t i) const {
     return input[i];
 }
 
+value &equation::get_input(size_t i) {
+    return input[i];
+}
+
 const var_t &equation::get_output(size_t i) const {
+    return output[i];
+}
+
+var_t &equation::get_output(size_t i) {
     return output[i];
 }
 
@@ -317,8 +333,9 @@ void expression::add_output(value val) {
     outvals.push_back(std::move(val));
 }
 
-void expression::add_equation(equation eq) {
+equation& expression::add_equation(equation eq) {
     equations.push_back(std::move(eq));
+    return equations[equations.size() - 1];
 }
 
 var_t expression::fresh_var(type_t type) {

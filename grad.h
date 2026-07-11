@@ -44,7 +44,9 @@ class grad_class {
         const jax::value& f_prime_val,
         const jax::value& adjoint_val);
 
-    void propagate_adjoints(const jax::equation& eq);
+    bool should_propagate(const std::vector<jax::value>& input_vals,
+        const std::vector<jax::var_t>& output_vars);
+    void propagate_adjoints(jax::equation& eq);
     bool adjoint_is_active(const jax::var_t& var, bool apply_update=true);
 
     jax::value negate(const jax::value& val);
@@ -76,6 +78,8 @@ class grad_class {
 
         return value{broadcast_var};
     }
+
+    void scan_carry_transform(jax::equation& eq);
 
     jax::var_t fresh_var(jax::type_t type);
 
