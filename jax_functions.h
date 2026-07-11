@@ -1,41 +1,16 @@
 #ifndef JAX_FUNCTIONS_H
 #define JAX_FUNCTIONS_H
 
-#include <type_traits>
-#include <valarray>
+#include <tuple>
 #include <vector>
 
+#include "tracer.h"
+
+inline jaxpr_tracer sin(const jaxpr_tracer& x) { return x.sin(); }
+inline jaxpr_tracer cos(const jaxpr_tracer& x) { return x.cos(); }
+inline jaxpr_tracer exp(const jaxpr_tracer& x) { return x.exp(); }
+
 namespace jax {
-
-template<typename T> requires(std::is_scalar_v<T>)
-T sin(T x) {
-    return std::sin(x);
-}
-
-template<typename T> requires(!std::is_scalar_v<T>)
-T sin(T x) {
-    return x.sin();
-}
-
-template<typename T> requires(std::is_scalar_v<T>)
-T cos(T x) {
-    return std::cos(x);
-}
-
-template<typename T> requires(!std::is_scalar_v<T>)
-T cos(T x) {
-    return x.cos();
-}
-
-template<typename T> requires(std::is_scalar_v<T>)
-T exp(T x) {
-    return std::exp(x);
-}
-
-template<typename T> requires(!std::is_scalar_v<T>)
-T exp(T x) {
-    return x.exp();
-}
 
 template<typename T>
 T transpose(T x, std::vector<size_t> permutation) {

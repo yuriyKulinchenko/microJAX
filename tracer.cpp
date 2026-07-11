@@ -354,7 +354,7 @@ jaxpr_tracer jaxpr_tracer::dot_general(
         throw formatted_error(
             "Error: the left and right batch lists should have equal length,"
             "Instead they have lengths {} and {} respectively",
-            left_contract.size(), right_contract.size());
+            left_batch.size(), right_batch.size());
     }
 
     for (size_t i = 0; i < left_contract.size(); i++) {
@@ -365,7 +365,7 @@ jaxpr_tracer jaxpr_tracer::dot_general(
         }
     }
 
-    for (size_t i = 0; i < left_contract.size(); i++) {
+    for (size_t i = 0; i < left_batch.size(); i++) {
         if (this_shape[left_batch[i]] != other_shape[right_batch[i]]) {
             throw std::logic_error(
                 "Error: rank size mismatch in batch indices"
@@ -464,6 +464,10 @@ void jaxpr_builder::register_output(const literal_t& literal) {
 
 void jaxpr_builder::register_output(const var_t& var) {
     jaxpr.outvals.push_back(value{var});
+}
+
+void jaxpr_builder::register_output(const array_t& array) {
+    register_output(array_value(array, *this));
 }
 
 expression&& jaxpr_builder::get_jaxpr() {

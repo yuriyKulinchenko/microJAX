@@ -23,7 +23,7 @@ namespace jax {
     X(SIN) X(COS) X(EXP) X(LOG)                 \
     X(NEG) X(TRANSPOSE) X(REDUCE_SUM)           \
     X(DOT_GENERAL) X(BROADCAST_IN_DIM)          \
-    X(CONVERT_ELEMENT_TYPE) X(COND)             \
+    X(CONVERT_ELEMENT_TYPE) X(COND) X(SCAN)     \
     X(EQ) X(NE) X(LT) X(LE) X(GT) X(GE)
 
 #define TYPE_ENUM_LIST(X) \
@@ -399,8 +399,26 @@ struct implicit_broadcast_result {
 implicit_broadcast_result get_implicit_broadcast_result(const std::vector<size_t>& left_shape,
     const std::vector<size_t>& right_shape);
 
+class equation;
 
-struct expression;
+struct expression {
+    std::vector<var_t> constvars;
+    std::vector<var_t> invars;
+    std::vector<value> outvals;
+    std::vector<equation> equations;
+    std::vector<array_t> consts;
+    size_t var_id = 0;
+
+    void add_constvar(var_t var);
+    void add_invar(var_t var);
+    void add_output(value val);
+    void add_equation(equation eq);
+    var_t fresh_var(type_t type);
+
+    void eliminate_dead_code();
+
+    size_t new_var_id();
+};
 
 struct transpose_params {
     std::vector<size_t> permutation;
@@ -430,6 +448,13 @@ struct cond_params {
     std::vector<expression> branches;
 };
 
+struct scan_params {
+    expression jaxpr;
+    size_t length;
+    size_t num_carry;
+    bool reverse;
+};
+
 using params_variant = std::variant<
     std::monostate,
     transpose_params,
@@ -437,7 +462,8 @@ using params_variant = std::variant<
     reduce_sum_params,
     broadcast_in_dim_params,
     convert_element_type_params,
-    cond_params
+    cond_params,
+    scan_params
 >;
 
 class equation {
@@ -460,27 +486,6 @@ private:
     primitive_op op;
     params_variant params;
 };
-
-struct expression {
-    std::vector<var_t> constvars;
-    std::vector<var_t> invars;
-    std::vector<value> outvals;
-    std::vector<equation> equations;
-    std::vector<array_t> consts;
-    size_t var_id = 0;
-
-    void add_constvar(var_t var);
-    void add_invar(var_t var);
-    void add_output(value val);
-    void add_equation(equation eq);
-    var_t fresh_var(type_t type);
-
-    void eliminate_dead_code();
-
-    size_t new_var_id();
-};
-
-
 }
 
 #endif //JAXPR_TYPES_H

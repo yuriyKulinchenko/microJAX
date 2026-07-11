@@ -165,6 +165,17 @@ std::ostream& emit_equation(std::ostream& stream, const equation& eq, size_t tab
             break;
         }
 
+        case primitive_op::SCAN: {
+            std::string space(4 * tab_count, ' ');
+            const auto& params = std::get<scan_params>(eq.get_params());
+            stream << "[jaxpr=\n";
+            emit_expr(stream, params.jaxpr, tab_count + 1);
+            stream << space << "    , length=" << params.length
+            << ", num_carry=" << params.num_carry
+            << (params.reverse ? ", reverse=true": "") << ']';
+            break;
+        }
+
         default:
     }
     stream << ' ';
