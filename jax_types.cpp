@@ -105,6 +105,10 @@ namespace jax {
         return shape;
     }
 
+    void type_t::set_dtype(const dtype_t new_dtype) {
+        dtype = new_dtype;
+    }
+
     var_t::var_t(size_t id, type_t type): id(id), type(std::move(type)) {}
 
     size_t var_t::get_id() const {
@@ -183,23 +187,31 @@ namespace jax {
         }
     }
 
-    template<typename F>
-    array_t elementwise_unary_array_op(const array_t& array, F f) {
+    template<double(*f)(double)>
+    array_t elementwise_unary_array_op(const array_t& array) {
         array_t new_array{array};
         for (double& x: new_array.get_value()) x = f(x);
         return new_array;
     }
 
     array_t array_t::sin() const {
-        return elementwise_unary_array_op(*this, std::sin<double>);
+        return elementwise_unary_array_op<std::sin>(*this);
     }
 
     array_t array_t::cos() const {
-        return elementwise_unary_array_op(*this, std::cos<double>);
+        return elementwise_unary_array_op<std::cos>(*this);
     }
 
     array_t array_t::exp() const {
-        return elementwise_unary_array_op(*this, std::exp<double>);
+        return elementwise_unary_array_op<std::exp>(*this);
+    }
+
+    array_t array_t::log() const {
+        return elementwise_unary_array_op<std::log>(*this);
+    }
+
+    array_t array_t::negate() const {
+        return elementwise_unary_array_op<[](auto x){return -x;}>(*this);
     }
 
     std::vector<size_t> extract_shape(const std::vector<size_t>& indices, const std::vector<size_t>& shape) {
@@ -425,6 +437,10 @@ namespace jax {
     std::optional<literal_t> array_t::get_literal() const {
         if (type.get_shape().size() != 0) return std::nullopt;
         return literal_t{type.get_dtype(), value[0]};
+    }
+
+    void array_t::set_type(type_t new_type) {
+        type = new_type;
     }
 
     dtype_t type_span::get_dtype() const {

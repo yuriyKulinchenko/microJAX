@@ -1,10 +1,13 @@
 #include <iostream>
 
+#include "jax_vm.h"
 #include "jax_types.h"
+#include "helper.h"
+#include "jax_logger.h"
 #include "jax_functions.h"
 #include "tracer.h"
-#include "jax_logger.h"
 #include "grad.h"
+
 
 
 template<typename T>
@@ -20,28 +23,41 @@ void scan_example();
 
 int main() {
     using namespace jax;
-    array_t A = array_t{type_t{dtype_t::F32, 3, 3}, {
+    using enum dtype_t;
+    array_t A = array_t{type_t{F32, 3, 3}, {
         5, 8, 9,
         1, 6, 7,
         4, 5, 3
     }};
 
-    array_t B = array_t{type_t{dtype_t::F32, 3, 3}, {
+    array_t B = array_t{type_t{F32, 3, 3}, {
         4, 8, 5,
         5, 1, 1,
         9, 6, 4
     }};
 
-    array_t C = array_t{type_t{dtype_t::F32, 2, 3}, {
+    array_t C = array_t{type_t{F32, 2, 3}, {
         1, 2, 3,
         4, 5, 6
     }};
 
-    std::cout << "Product: " << dot_general(A, B, {1}, {0}, {}, {}) << '\n';
-    std::cout << "Reduction of A: " << reduce_sum(A, {0}) << '\n';
-    std::cout << "Reduction of B along other axes: " << reduce_sum(B, {1}) << '\n';
-    std::cout << "C: " << C << '\n';
-    std::cout << "C transposed: " << transpose(C, {1, 0}) << '\n';
+    // std::cout << "Product: " << dot_general(A, B, {1}, {0}, {}, {}) << '\n';
+    // std::cout << "Reduction of A: " << reduce_sum(A, {0}) << '\n';
+    // std::cout << "Reduction of B along other axes: " << reduce_sum(B, {1}) << '\n';
+    // std::cout << "C: " << C << '\n';
+    // std::cout << "C transposed: " << transpose(C, {1, 0}) << '\n';
+
+    jaxpr_builder builder {};
+    auto x = builder.register_tracer(F32, 4);
+    builder.register_output(softmax(x));
+    auto jaxpr = builder.get_jaxpr();
+
+    std::cout << "Softmax jaxpr: " << jaxpr;
+
+    array_t input = array_t{type_t{F32, 4}, {1, 2, 3, 4}};
+
+    jax_vm vm(jaxpr);
+    std::cout << vm.run({input})[0];
     return 0;
 }
 

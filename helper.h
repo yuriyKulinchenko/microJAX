@@ -35,7 +35,7 @@ std::ostream& operator<<(std::ostream& stream, const std::vector<T>& vector) {
 }
 
 template <typename T, typename U>
-std::ostream& operator<<(std::ostream& stream, std::unordered_map<T, U>& map) {
+std::ostream& operator<<(std::ostream& stream, const std::unordered_map<T, U>& map) {
     stream << '{';
 
     auto it = map.begin();

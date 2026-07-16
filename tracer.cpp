@@ -224,6 +224,10 @@ jaxpr_tracer jaxpr_tracer::exp() const {
     return unary_op(value{var}, primitive_op::EXP, builder);
 }
 
+jaxpr_tracer jaxpr_tracer::log() const {
+    return unary_op(value{var}, primitive_op::LOG, builder);
+}
+
 jaxpr_tracer jaxpr_tracer::transpose(std::vector<size_t> permutation) const {
     // The transpose must actually be possible:
 

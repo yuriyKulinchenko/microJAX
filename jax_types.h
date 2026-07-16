@@ -72,7 +72,7 @@ public:
     [[nodiscard]] dtype_t get_dtype() const;
     [[nodiscard]] const std::vector<size_t>& get_shape() const;
 
-    void set_dtype(dtype_t dtype);
+    void set_dtype(dtype_t new_dtype);
 
 private:
     dtype_t dtype;
@@ -128,7 +128,6 @@ private:
 class array_t {
 public:
     friend class array_span;
-
     array_t(type_t type, std::vector<double> value);
 
     static array_t build(dtype_t dtype, std::vector<size_t> shape,
@@ -172,6 +171,8 @@ public:
     [[nodiscard]] array_t sin() const;
     [[nodiscard]] array_t cos() const;
     [[nodiscard]] array_t exp() const;
+    [[nodiscard]] array_t log() const;
+    [[nodiscard]] array_t negate() const;
 
     [[nodiscard]] array_t transpose(const std::vector<size_t>& permutation) const;
     [[nodiscard]] array_t reduce_sum(const std::vector<size_t>& axes) const;
@@ -193,6 +194,8 @@ public:
     [[nodiscard]] std::vector<double>& get_value();
     [[nodiscard]] std::optional<literal_t> get_literal() const;
 
+    void set_type(type_t new_type);
+
     [[nodiscard]] bool has_single_value(f64 val) const;
     [[nodiscard]] bool has_single_value() const;
 
@@ -206,7 +209,6 @@ private:
     f64 single_value = 0;
     bool has_single_value_ = false;
 };
-
 
 struct type_span {
     dtype_t dtype;

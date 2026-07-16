@@ -39,6 +39,7 @@ public:
     [[nodiscard]] jaxpr_tracer sin() const;
     [[nodiscard]] jaxpr_tracer cos() const;
     [[nodiscard]] jaxpr_tracer exp() const;
+    [[nodiscard]] jaxpr_tracer log() const;
 
     [[nodiscard]] jaxpr_tracer transpose(std::vector<size_t> permutation) const;
     [[nodiscard]] jaxpr_tracer reduce_sum(std::vector<size_t> axes) const;
