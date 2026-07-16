@@ -159,33 +159,57 @@ inline bool is_identity_permutation(const std::vector<size_t>& permutation) {
     return true;
 }
 
-template<typename F>
-void dynamic_nested_loop(std::vector<size_t>& indices, const std::vector<size_t>& bounds, F f) {
-    if (bounds.size() == 0) {
-        f(bounds);
-        return;
-    }
-
-    // precondition: indices.size() == bounds.size()
-    std::ranges::fill(indices, 0);
-
-    while (true) {
-        f(indices);
-        for (size_t j = indices.size(); j--> 0;) {
-            if (indices[j] < bounds[j] - 1) {
-                indices[j]++;
-                break;
-            }
-            if (j == 0) return;
-            indices[j] = 0;
-        }
-    }
-}
-
-class cartesian_product_iterator {
+class cartesian_product {
 public:
+    class iterator {
+    public:
+        iterator(
+            std::vector<size_t>& indices,
+            const std::vector<size_t>& bounds, bool reached_end):
+        indices(indices), bounds(bounds), reached_end(reached_end) {}
+
+        const std::vector<size_t>& operator*() const {
+            return indices;
+        }
+
+        iterator& operator++() {
+            for (size_t j = indices.size(); j--> 0;) {
+                if (indices[j] < bounds[j] - 1) {
+                    indices[j]++;
+                    break;
+                }
+                indices[j] = 0;
+                if (j == 0) reached_end = true;
+            }
+            if (indices.size() == 0) reached_end = true;
+            return *this;
+        }
+
+        bool operator==(const iterator& other) const {
+            return reached_end == other.reached_end;
+        }
+
+    private:
+        std::vector<size_t>& indices;
+        const std::vector<size_t>& bounds;
+        bool reached_end; // if reached_end = true, indices and bounds are in an unspecified state
+    };
+
+
+    cartesian_product(std::vector<size_t>& indices, const std::vector<size_t>& bounds):
+    indices(indices), bounds(bounds) {}
+
+    iterator begin() const {
+        return iterator {indices, bounds, false};
+    }
+
+    iterator end() const {
+        return iterator {indices, bounds, true};
+    }
 
 private:
+    std::vector<size_t>& indices;
+    const std::vector<size_t>& bounds;
 
 };
 

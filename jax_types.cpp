@@ -284,24 +284,21 @@ array_t array_t::dot_general(
     (num_elements(batch_sizes) * num_elements(left_free_sizes) * num_elements(right_free_sizes), 0);
     size_t i = 0;
 
-    std::vector<size_t> b(batch_sizes.size());
-    std::vector<size_t> f_l(left_free_sizes.size());
-    std::vector<size_t> f_r(right_free_sizes.size());
-    std::vector<size_t> c(contract_sizes.size());
+    std::vector<size_t> batch_indices(batch_sizes.size());
+    std::vector<size_t> left_free_indices(left_free_sizes.size());
+    std::vector<size_t> right_free_indices(right_free_sizes.size());
+    std::vector<size_t> contract_indices(contract_sizes.size());
 
-    dynamic_nested_loop(b, batch_sizes, [&](Is batch_indices) {
-        dynamic_nested_loop(f_l, left_free_sizes, [&](Is left_free_indices) {
-           dynamic_nested_loop(f_r, right_free_sizes, [&](Is right_free_indices) {
-               dynamic_nested_loop(c, contract_sizes, [&](Is contract_indices) {
-                   // value[b, f_l, f_r] += left[b, f_l, c] * right[b, f_r, c]
-                    double x = left_access(batch_indices, left_free_indices, contract_indices)
-                        * right_access(batch_indices, right_free_indices, contract_indices);
-                   new_value[i] += x;
-               });
-               i++;
-           });
-        });
-    });
+    for (auto& b: cartesian_product{batch_indices, batch_sizes}) {
+        for (auto& f_l: cartesian_product{left_free_indices, left_free_sizes}) {
+            for (auto& f_r: cartesian_product{right_free_indices, right_free_sizes}) {
+                for (auto& c: cartesian_product{contract_indices, contract_sizes}) {
+                    new_value[i] += left_access(b, f_l, c) * right_access(b, f_r, c);
+                }
+                i++;
+            }
+        }
+    }
 
     return array_t {type_t {type.get_dtype(), std::move(shape)}, std::move(new_value)};
 }
