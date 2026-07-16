@@ -73,8 +73,8 @@ void switch_example() {
      auto j = builder.register_tracer(I32);
      auto x = builder.register_tracer(F32, 2, 2);
      auto y = builder.register_tracer(F64, 2, 2);
-     auto k = array_t::build<f32>({4, 2, 2}, [](auto& is) {
-         return static_cast<f32>(is[0] + is[1] + is[2]);
+     auto k = array_t::build(F32, {4, 2, 2}, [](auto& is) -> double {
+         return is[0] + is[1] + is[2];
      });
 
      auto z = switch_on(i < j, std::tuple{

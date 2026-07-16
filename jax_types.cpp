@@ -3,6 +3,12 @@
 
 namespace jax {
 
+size_t num_elements(std::span<const size_t> shape) {
+    size_t total = 1;
+    for (size_t dim : shape) total *= dim;
+    return total;
+}
+
 std::string_view to_string(primitive_op op) {
     switch (op) {
 #define X(name) case primitive_op::name: return #name;
@@ -121,9 +127,45 @@ dtype_t var_t::get_dtype() const {
     return type.get_dtype();
 }
 
-array_t::array_t(f32 value)
-: array_t(type_t{dtype_t::F32}, std::vector<f32>{value}) {
+array_t::array_t(type_t type, std::vector<double> value):
+type(std::move(type)),
+value(std::move(value)) {
+    if (this->value.size() != num_elements(this->type.get_shape())) {
+        throw std::logic_error("Error: array value does not match the size of its shape");
+    }
+
+    compute_strides();
     check_single_value();
+}
+
+array_t::array_t(f32 value)
+: array_t(type_t{dtype_t::F32}, std::vector<double>{value}) {}
+
+array_t array_t::build(dtype_t dtype, std::vector<size_t> shape,
+    const std::function<double(const std::vector<size_t>&)>& f) {
+    type_t type {dtype, std::move(shape)};
+
+    const auto& shape_vector = type.get_shape();
+    auto index_vector = std::vector<size_t>(shape_vector.size(), 0);
+    auto output_vector = std::vector<double>(num_elements(shape_vector));
+
+    for (auto& output: output_vector) {
+        output = f(index_vector);
+        for (size_t j = index_vector.size(); j--> 0;) {
+            if (index_vector[j] < shape_vector[j] - 1) {
+                index_vector[j]++;
+                break;
+            }
+            index_vector[j] = 0;
+        }
+    }
+
+    return array_t{std::move(type), std::move(output_vector)};
+}
+
+array_t array_t::build_fill(type_t type, double value) {
+    size_t count = num_elements(type.get_shape());
+    return array_t{std::move(type), std::vector<double>(count, value)};
 }
 
 void array_t::compute_strides() {
@@ -146,17 +188,14 @@ if(type != other.get_type()) {                                                  
     throw std::logic_error("ERROR: dimensionality mismatch when attempting elementwise operation"); \
 }
 
-#define BINARY_OP_OTHER(op, op_assign)                                      \
-array_t array_t::operator op (const array_t& other) const {                 \
-    DIMENSIONALITY_ERROR();                                                 \
-    return std::visit([&](auto& vec) -> array_t {                           \
-        auto return_vec = vec;                                              \
-        auto other_vec = std::get<decltype(return_vec)>(other.value);       \
-        for (size_t i = 0; i < return_vec.size(); i++) {                    \
-            return_vec[i] op_assign other_vec[i];                           \
-        }                                                                   \
-        return array_t{type, return_vec};                                   \
-    }, value);                                                              \
+#define BINARY_OP_OTHER(op, op_assign)                          \
+array_t array_t::operator op (const array_t& other) const {     \
+    DIMENSIONALITY_ERROR();                                     \
+    std::vector<double> result = value;                        \
+    for (size_t i = 0; i < result.size(); i++) {               \
+        result[i] op_assign other.value[i];                    \
+    }                                                          \
+    return array_t{type, std::move(result)};                   \
 }
 
 BINARY_OP_OTHER(+, +=);
@@ -164,67 +203,113 @@ BINARY_OP_OTHER(-, -=);
 BINARY_OP_OTHER(*, *=);
 BINARY_OP_OTHER(/, /=);
 
+array_t array_t::sin() const {
+    array_t new_array {*this};
+    for (double& x : new_array.value) x = std::sin(x);
+    return new_array;
+}
+
 const type_t& array_t::get_type() const {
     return type;
 }
 
-const vector_variant &array_t::get_value() const {
+const std::vector<double>& array_t::get_value() const {
     return value;
 }
 
-vector_variant &array_t::get_value() {
+std::vector<double>& array_t::get_value() {
     return value;
 }
 
 std::optional<literal_t> array_t::get_literal() const {
     if (type.get_shape().size() != 0) return std::nullopt;
-    switch (const dtype_t dtype = type.get_dtype()) {
-        using enum dtype_t;
-        case I32: return literal_t{dtype, std::get<std::vector<i32>>(value)[0]};
-        case I64: return literal_t{dtype, std::get<std::vector<i64>>(value)[0]};
-        case F32: return literal_t{dtype, std::get<std::vector<f32>>(value)[0]};
-        case F64: return literal_t{dtype, std::get<std::vector<f64>>(value)[0]};
-        default: return literal_t{dtype, std::get<std::vector<b8>>(value)[0]};
+    return literal_t{type.get_dtype(), value[0]};
+}
+
+dtype_t type_span::get_dtype() const {
+    return dtype;
+}
+
+std::span<const size_t> type_span::get_shape() const {
+    return shape;
+}
+
+array_span::array_span(const array_t& array, const std::vector<size_t>& indices) {
+    type.dtype = array.type.get_dtype();
+
+    size_t i_0 = 0;
+    for (size_t i = 0; i < indices.size(); i++) {
+        i_0 += array.stride[i] * indices[i];
     }
+
+    const auto& array_shape = array.type.get_shape();
+    type.shape = std::span{array_shape.begin() + indices.size(), array_shape.end()};
+
+    const auto& array_stride = array.stride;
+    stride = std::span {array_stride.begin() + indices.size(), array_stride.end()};
+
+    // shape_size(i) = stride[i] * shape[i]
+    size_t total_size = array.stride[indices.size()] * array.type.get_shape()[indices.size()];
+    value = std::span{array.value.begin() + i_0, total_size};
+}
+
+double array_span::operator[](const std::vector<size_t>& indices) const {
+    return access(indices);
+}
+
+const double& array_span::access(const std::vector<size_t>& indices) const {
+    return value[flatten_index(stride, indices)];
 }
 
 const type_span& array_span::get_type() const {
     return type;
 }
 
-const span_variant& array_span::get_value() const {
-    return value;
-}
-
-span_variant& array_span::get_value() {
+std::span<const double> array_span::get_value() const {
     return value;
 }
 
 void array_t::check_single_value() {
-    std::visit([this](auto& vec) {
-        if (vec.size() == 0) {
-            this->has_single_value_ = true;
+    if (value.empty()) {
+        has_single_value_ = true;
+        return;
+    }
+
+    double val = value[0];
+    for (size_t i = 1; i < value.size(); i++) {
+        if (value[i] != val) {
+            has_single_value_ = false;
             return;
         }
+    }
 
-        auto val = vec[0];
-        for (size_t i = 1; i < vec.size(); i++) {
-            if (vec[i] != val) {
-                this->has_single_value_ = false;
-                return;
-            }
-        }
-
-        this->has_single_value_ = true;
-        this->single_value = static_cast<f64>(val);
-    }, value);
+    has_single_value_ = true;
+    single_value = val;
 }
+
+double array_t::operator[](const std::vector<size_t>& indices) {
+    return access(indices);
+}
+
+double& array_t::access(const std::vector<size_t>& indices) {
+    return value[flatten_index(stride, indices)];
+}
+
+bool array_t::has_single_value(f64 val) const {
+    return has_single_value_ && val == single_value;
+}
+
+bool array_t::has_single_value() const {
+    return has_single_value_;
+}
+
+literal_t::literal_t(dtype_t dtype, double value): dtype(dtype), value(value) {}
 
 dtype_t literal_t::get_dtype() const {
     return dtype;
 }
 
-const value_variant &literal_t::get_value() const {
+double literal_t::get_value() const {
     return value;
 }
 

@@ -50,34 +50,7 @@ class grad_class {
     bool adjoint_is_active(const jax::var_t& var, bool apply_update=true);
 
     jax::value negate(const jax::value& val);
-    jax::value broadcasted_value(const jax::type_t& type, auto x) {
-        using namespace jax;
-        literal_t literal = std::invoke([&]() -> literal_t {
-            switch (type.get_dtype()) {
-                using enum dtype_t;
-                case I32: return literal_t{I32, static_cast<i32>(x)};
-                case I64: return literal_t{I64, static_cast<i64>(x)};
-                case F32: return literal_t{F32, static_cast<f32>(x)};
-                case F64: return literal_t{F64, static_cast<f64>(x)};
-                default: return literal_t{BOOL, static_cast<b8>(x)};
-            }
-        });
-
-        if (type.get_shape().size() == 0) {
-            return value{literal};
-        }
-
-        var_t broadcast_var = fresh_var(type);
-
-        output_expr.equations.emplace_back(
-            std::vector{value{literal}},
-            std::vector{broadcast_var},
-            primitive_op::BROADCAST_IN_DIM,
-            broadcast_in_dim_params{type.get_shape()}
-        );
-
-        return value{broadcast_var};
-    }
+    jax::value broadcasted_value(const jax::type_t& type, double x);
 
     void scan_carry_transform(jax::equation& eq);
 

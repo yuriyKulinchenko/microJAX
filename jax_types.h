@@ -1,6 +1,7 @@
 #ifndef JAXPR_TYPES_H
 #define JAXPR_TYPES_H
 #include <any>
+#include <functional>
 #include <string_view>
 #include <variant>
 #include <vector>
@@ -93,33 +94,6 @@ private:
     size_t id;
 };
 
-#define check_type(T_real, T_enum)                          \
-if constexpr (std::is_same_v<T, T_real>) {                  \
-    if(type.get_dtype() != dtype_t::T_enum) {               \
-        throw std::logic_error("Error: type mismatch");     \
-    }                                                       \
-}
-
-using value_variant = std::variant<i32, i64, f32, f64, b8>;
-
-using vector_variant = std::variant<
-    std::vector<i32>, std::vector<i64>,
-    std::vector<f32>,std::vector<f64>,
-    std::vector<b8>
->;
-
-using span_variant = std::variant<
-    std::span<const i32>, std::span<const i64>,
-    std::span<const f32>,std::span<const f64>,
-    std::span<const b8>
->;
-
-inline size_t num_elements(std::span<const size_t> shape) {
-    size_t total = 1;
-    for (size_t dim : shape) total *= dim;
-    return total;
-}
-
 size_t flatten_index(std::span<const size_t> stride, std::same_as<size_t> auto... indices) {
     size_t idx = 0;
     size_t axis = 0;
@@ -135,165 +109,85 @@ inline size_t flatten_index(std::span<const size_t> stride, const std::vector<si
     return idx;
 }
 
-#define ACCESS_DISPATCH(...)                    \
-switch (type.get_dtype()) {                     \
-    using enum dtype_t;                         \
-    case I32: return access<i32>(__VA_ARGS__);  \
-    case I64: return access<i64>(__VA_ARGS__);  \
-    case F32: return access<f32>(__VA_ARGS__);  \
-    case F64: return access<f64>(__VA_ARGS__);  \
-    case BOOL: return access<b8>(__VA_ARGS__);  \
-    default: return 0;                          \
-}
-
-
 class literal_t {
 public:
-    literal_t(const dtype_t dtype, auto x): dtype(dtype) {
-        switch (dtype) {
-            using enum dtype_t;
-            case I32: value = static_cast<i32>(x); break;
-            case I64: value = static_cast<i64>(x); break;
-            case F32: value = static_cast<f32>(x); break;
-            case F64: value = static_cast<f64>(x); break;
-            case BOOL: value = static_cast<b8>(x); break;
-        }
-    }
+    literal_t(dtype_t dtype, double value);
 
     [[nodiscard]] dtype_t get_dtype() const;
-    [[nodiscard]] const value_variant& get_value() const;
+    [[nodiscard]] double get_value() const;
     [[nodiscard]] static const std::vector<size_t>& get_shape();
 
 private:
     dtype_t dtype;
-    value_variant value;
+    double value;
     inline static std::vector<size_t> shape = {};
 };
 
 class array_t {
 public:
     friend class array_span;
-    template<typename T>
-    array_t(type_t type, std::vector<T> value):
-    type(std::move(type)),
-    value(std::move(value)) {
-        check_type(i32, I32);
-        check_type(i64, I64);
-        check_type(f32, F32);
-        check_type(f64, F64);
-        check_type(b8, BOOL);
 
-        if (std::get<std::vector<T>>(this->value).size() != num_elements(this->type.get_shape())) {
-            throw std::logic_error("Error: array value does not match the size of its dimensions");
-        }
+    array_t(type_t type, std::vector<double> value);
 
-        compute_strides();
-        check_single_value();
-    }
+    static array_t build(dtype_t dtype, std::vector<size_t> shape,
+        const std::function<double(const std::vector<size_t>&)>& f);
 
-    template<typename T>
-    static array_t build(std::vector<size_t> shape, invocable_r<T, const std::vector<size_t>&> auto f) {
-        // f takes the std::vector
-
-        dtype_t dtype;
-        using enum dtype_t;
-        if constexpr (std::is_same_v<T, i32>) {
-            dtype = I32;
-        } else if constexpr(std::is_same_v<T, i64>) {
-            dtype = I64;
-        } else if constexpr(std::is_same_v<T, f32>) {
-            dtype = F32;
-        } else if constexpr(std::is_same_v<T, f64>) {
-            dtype = F64;
-        } else {
-            dtype = BOOL;
-        }
-
-        type_t type {dtype, std::move(shape)};
-
-        const auto& shape_vector = type.get_shape();
-        auto index_vector = std::vector<size_t>(type.get_shape().size(), 0);
-        auto output_vector = std::vector<T>(num_elements(type.get_shape()));
-
-        for(auto& output: output_vector) {
-            output = f(index_vector);
-            for (size_t j = index_vector.size(); j--> 0;) {
-                if (index_vector[j] < shape_vector[j] - 1) {
-                    index_vector[j]++;
-                    break;
-                }
-                index_vector[j] = 0;
-            }
-        }
-
-        return array_t{std::move(type), output_vector};
-    }
-
-    static array_t build_fill(type_t type, auto value) {
-        size_t count = num_elements(type.get_shape());
-        switch (type.get_dtype()) {
-            using enum dtype_t;
-            case I32:
-            return array_t{std::move(type), std::vector<i32>(count, value)};
-            case I64:
-            return array_t{std::move(type), std::vector<i64>(count, value)};
-            case F32:
-            return array_t{std::move(type), std::vector<f32>(count, value)};
-            case F64:
-            return array_t{std::move(type), std::vector<f64>(count, value)};
-            case BOOL:
-            return array_t{std::move(type), std::vector<b8>(count, value)};
-            default:
-            return array_t{0};
-        }
-    }
+    static array_t build_fill(type_t type, double value);
 
     // ReSharper disable once CppNonExplicitConvertingConstructor
     array_t(f32 value);
 
     // Quite inefficient, use sparingly
-    std::variant<i32, i64, f32, f64, b8> operator[](std::same_as<size_t> auto... indices) {
-        ACCESS_DISPATCH(indices...)
+    double operator[](std::same_as<size_t> auto... indices) {
+        return access(indices...);
     }
 
-    std::variant<i32, i64, f32, f64, b8> operator[](const std::vector<size_t>& indices) {
-        ACCESS_DISPATCH(indices)
+    double operator[](const std::vector<size_t>& indices);
+
+    double& access(std::same_as<size_t> auto... indices) {
+        return value[flatten_index(stride, indices...)];
     }
 
-    template<typename T>
-    T& access(std::same_as<size_t> auto... indices) {
-        return std::get<std::vector<T>>(value)[flatten_index(stride, indices...)];
-    }
-
-    template<typename T>
-    T& access(const std::vector<size_t>& indices) {
-        return std::get<std::vector<T>>(value)[flatten_index(stride, indices)];
-    }
+    double& access(const std::vector<size_t>& indices);
 
     array_t operator+(const array_t& other) const;
     array_t operator-(const array_t& other) const;
     array_t operator*(const array_t& other) const;
     array_t operator/(const array_t& other) const;
 
+    [[nodiscard]] array_t sin() const;
+    [[nodiscard]] array_t cos() const;
+    [[nodiscard]] array_t exp() const;
+
+    [[nodiscard]] array_t transpose(const std::vector<size_t>& permutation) const;
+    [[nodiscard]] array_t reduce_sum(const std::vector<size_t>& axes) const;
+    [[nodiscard]] array_t convert_element_type(dtype_t dtype) const;
+
+    [[nodiscard]] array_t broadcast_in_dim(
+        const std::vector<size_t>& shape,
+        const std::vector<size_t>& broadcast_dimensions) const;
+
+    [[nodiscard]] array_t dot_general(
+        const array_t& other,
+        const std::vector<size_t>& left_contract,
+        const std::vector<size_t>& right_contract,
+        const std::vector<size_t>& left_batch,
+        const std::vector<size_t>& right_batch) const;
+
     [[nodiscard]] const type_t& get_type() const;
-    [[nodiscard]] const vector_variant& get_value() const;
-    [[nodiscard]] vector_variant& get_value();
+    [[nodiscard]] const std::vector<double>& get_value() const;
+    [[nodiscard]] std::vector<double>& get_value();
     [[nodiscard]] std::optional<literal_t> get_literal() const;
 
-    bool has_single_value(const f64 val) const {
-        return has_single_value_ && val == single_value;
-    }
-
-    bool has_single_value() const {
-        return has_single_value_;
-    }
+    [[nodiscard]] bool has_single_value(f64 val) const;
+    [[nodiscard]] bool has_single_value() const;
 
 private:
     void compute_strides();
     void check_single_value();
 
     type_t type;
-    vector_variant value;
+    std::vector<double> value;
     std::vector<size_t> stride;
     f64 single_value = 0;
     bool has_single_value_ = false;
@@ -304,66 +198,36 @@ struct type_span {
     dtype_t dtype;
     std::span<const size_t> shape;
 
-    [[nodiscard]] dtype_t get_dtype() const { return dtype; }
-    [[nodiscard]] std::span<const size_t> get_shape() const { return shape; }
+    [[nodiscard]] dtype_t get_dtype() const;
+    [[nodiscard]] std::span<const size_t> get_shape() const;
 };
 
 // Non-owning view, potentially to a subset of the array
 class array_span {
 public:
 
-    array_span(const array_t& array, const std::vector<size_t>& indices) {
-        type.dtype = array.type.get_dtype();
+    array_span(const array_t& array, const std::vector<size_t>& indices);
 
-        size_t i_0 = 0;
-        for (size_t i = 0; i < indices.size(); i++) {
-            i_0 += array.stride[i] * indices[i];
-        }
-
-        const auto& array_shape = array.type.get_shape();
-        type.shape = std::span{array_shape.begin() + indices.size(), array_shape.end()};
-
-        const auto& array_stride = array.stride;
-        stride = std::span {array_stride.begin() + indices.size(), array_stride.end()};
-
-        // shape_size(i) = stride[i] * shape[i]
-        size_t total_size = array.stride[indices.size()] * array.type.get_shape()[indices.size()];
-        value = std::visit([=](const auto& vec) -> span_variant {
-            return std::span{vec.begin() + i_0, total_size};
-        }, array.value);
+    double operator[](std::same_as<size_t> auto... indices) const {
+        return access(indices...);
     }
 
-    value_variant operator[](std::same_as<size_t> auto... indices) const {
-        ACCESS_DISPATCH(indices...)
+    double operator[](const std::vector<size_t>& indices) const;
+
+    const double& access(std::same_as<size_t> auto... indices) const {
+        return value[flatten_index(stride, indices...)];
     }
 
-    value_variant operator[](const std::vector<size_t>& indices) const {
-        ACCESS_DISPATCH(indices)
-    }
-
-    template<typename T>
-    const T& access(std::same_as<size_t> auto... indices) const {
-        return std::get<std::span<const T>>(value)[flatten_index(stride, indices...)];
-    }
-
-    template<typename T>
-    const T& access(const std::vector<size_t>& indices) const {
-        return std::get<std::span<const T>>(value)[flatten_index(stride, indices)];
-    }
+    const double& access(const std::vector<size_t>& indices) const;
 
     [[nodiscard]] const type_span& get_type() const;
-    [[nodiscard]] const span_variant& get_value() const;
-    [[nodiscard]] span_variant& get_value();
+    [[nodiscard]] std::span<const double> get_value() const;
 
 private:
     type_span type;
     std::span<const size_t> stride;
-    span_variant value;
+    std::span<const double> value;
 };
-
-
-#undef check_type
-#undef ACCESS_DISPATCH
 
 class value {
 public:

@@ -129,15 +129,10 @@ void grad_class::update_adjoint(
 value grad_class::negate(const value& val) {
     if (val.is<literal_t>()) {
         auto& literal = val.get_literal();
-        dtype_t dtype = literal.get_dtype();
-        switch (dtype) {
-            using enum dtype_t;
-            case I32: return value{literal_t(dtype, i32{-std::get<i32>(literal.get_value())})};
-            case I64: return value{literal_t(dtype, i64{-std::get<i64>(literal.get_value())})};
-            case F32: return value{literal_t(dtype, f32{-std::get<f32>(literal.get_value())})};
-            case F64: return value{literal_t(dtype, f64{-std::get<f64>(literal.get_value())})};
-            default: throw std::logic_error{"Error: cannot negate boolean"};
+        if (literal.get_dtype() == dtype_t::BOOL) {
+            throw std::logic_error{"Error: cannot negate boolean"};
         }
+        return value{literal_t(literal.get_dtype(), -literal.get_value())};
     }
 
     // val is a var_t - emit a negation:
@@ -152,6 +147,26 @@ value grad_class::negate(const value& val) {
     );
 
     return value{negated_var};
+}
+
+value grad_class::broadcasted_value(const type_t& type, double x) {
+    using namespace jax;
+    literal_t literal{type.get_dtype(), x};
+
+    if (type.get_shape().size() == 0) {
+        return value{literal};
+    }
+
+    var_t broadcast_var = fresh_var(type);
+
+    output_expr.equations.emplace_back(
+        std::vector{value{literal}},
+        std::vector{broadcast_var},
+        primitive_op::BROADCAST_IN_DIM,
+        broadcast_in_dim_params{type.get_shape()}
+    );
+
+    return value{broadcast_var};
 }
 
 bool all_inputs_constant(const std::vector<value>& inputs) {
@@ -781,7 +796,7 @@ void grad_class::propagate_adjoints(equation& eq) {
                 if (value* adjoint = get_adjoint(output_var)) {
                     inputs.push_back(*adjoint);
                 } else {
-                    inputs.push_back(broadcasted_value(output_var.get_type(), 0));
+                    inputs.push_back(broadcasted_value(output_var.get_type(), 0.));
                 }
             }
 
@@ -879,7 +894,7 @@ void grad_class::propagate_adjoints(equation& eq) {
                 if (value* c_adjoint = get_adjoint(c_var)) {
                     inputs.push_back(*c_adjoint);
                 } else {
-                    inputs.push_back(broadcasted_value(c_var.get_type(), 0));
+                    inputs.push_back(broadcasted_value(c_var.get_type(), 0.));
                 }
             }
 
@@ -901,7 +916,7 @@ void grad_class::propagate_adjoints(equation& eq) {
                 if (value* y_adjoint = get_adjoint(y_var)) {
                     inputs.push_back(*y_adjoint);
                 } else {
-                    inputs.push_back(broadcasted_value(y_var.get_type(), 1));
+                    inputs.push_back(broadcasted_value(y_var.get_type(), 1.));
                 }
             }
 
