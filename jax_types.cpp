@@ -191,11 +191,11 @@ if(type != other.get_type()) {                                                  
 #define BINARY_OP_OTHER(op, op_assign)                          \
 array_t array_t::operator op (const array_t& other) const {     \
     DIMENSIONALITY_ERROR();                                     \
-    std::vector<double> result = value;                        \
-    for (size_t i = 0; i < result.size(); i++) {               \
-        result[i] op_assign other.value[i];                    \
-    }                                                          \
-    return array_t{type, std::move(result)};                   \
+    std::vector<double> result = value;                         \
+    for (size_t i = 0; i < result.size(); i++) {                \
+        result[i] op_assign other.value[i];                     \
+    }                                                           \
+    return array_t{type, std::move(result)};                    \
 }
 
 BINARY_OP_OTHER(+, +=);
@@ -203,11 +203,109 @@ BINARY_OP_OTHER(-, -=);
 BINARY_OP_OTHER(*, *=);
 BINARY_OP_OTHER(/, /=);
 
-array_t array_t::sin() const {
-    array_t new_array {*this};
-    for (double& x : new_array.value) x = std::sin(x);
+template<typename F>
+array_t elementwise_unary_array_op(const array_t& array, F f) {
+    array_t new_array{array};
+    for (double& x: new_array.get_value()) x = f(x);
     return new_array;
 }
+
+array_t array_t::sin() const {
+    return elementwise_unary_array_op(*this, std::sin<double>);
+}
+
+array_t array_t::cos() const {
+    return elementwise_unary_array_op(*this, std::cos<double>);
+}
+
+array_t array_t::exp() const {
+    return elementwise_unary_array_op(*this, std::exp<double>);
+}
+
+array_t array_t::dot_general(
+    const array_t& other,
+    const std::vector<size_t>& left_contract,
+    const std::vector<size_t>& right_contract,
+    const std::vector<size_t>& left_batch,
+    const std::vector<size_t>& right_batch) const {
+    // new dimensions are (batch, free_left, free_right)
+    std::vector<size_t> left_free = complement(left_batch, left_contract, type.get_shape().size());
+    std::vector<size_t> right_free = complement(right_batch, right_contract, other.type.get_shape().size());
+
+    // For dynamic looping:
+
+    using Is = const std::vector<size_t>&;
+
+    auto extract_shape = [](Is indices, Is shape) -> std::vector<size_t> {
+        std::vector<size_t> new_shape {};
+        new_shape.reserve(indices.size());
+        std::ranges::transform(indices, std::back_inserter(new_shape), [&](size_t i) {
+           return shape[i];
+        });
+        return new_shape;
+    };
+
+    const std::vector<size_t> batch_sizes = extract_shape(left_batch, type.get_shape());
+    const std::vector<size_t> contract_sizes = extract_shape(left_contract, type.get_shape());
+    const std::vector<size_t> left_free_sizes = extract_shape(left_free, type.get_shape());
+    const std::vector<size_t> right_free_sizes = extract_shape(right_free, other.type.get_shape());
+
+    std::vector<size_t> shape {};
+    shape.reserve(left_batch.size() + left_free.size() + right_free.size());
+
+    for (size_t x: batch_sizes) shape.push_back(x);
+    for (size_t x: left_free_sizes) shape.push_back(x);
+    for (size_t x: right_free_sizes) shape.push_back(x);
+
+    auto tensor_access = [](
+        Is batch_indices, Is free_indices, Is contract_indices,
+        Is batch, Is free, Is contract,
+        const array_t& array, std::vector<size_t>& indices
+    ) -> double {
+        for (size_t i = 0; i < batch_indices.size(); i++) indices[batch[i]] = batch_indices[i];
+        for (size_t i = 0; i < free_indices.size(); i++) indices[free[i]] = free_indices[i];
+        for (size_t i = 0; i < contract_indices.size(); i++) indices[contract[i]] = contract_indices[i];
+        return array.access(indices);
+    };
+
+    std::vector<size_t> left_scratch_indices(type.get_shape().size());
+    auto left_access = [&](Is batch_indices, Is free_indices, Is contract_indices) -> double {
+        return tensor_access(batch_indices, free_indices, contract_indices,
+            left_batch, left_free, left_contract, *this, left_scratch_indices);
+    };
+
+    std::vector<size_t> right_scratch_indices(other.type.get_shape().size());
+    auto right_access = [&](Is batch_indices, Is free_indices, Is contract_indices) -> double {
+        return tensor_access(batch_indices, free_indices, contract_indices,
+            right_batch, right_free, right_contract, other, right_scratch_indices);
+    };
+
+    std::vector<double> new_value
+    (num_elements(batch_sizes) * num_elements(left_free_sizes) * num_elements(right_free_sizes), 0);
+    size_t i = 0;
+
+    std::vector<size_t> b(batch_sizes.size());
+    std::vector<size_t> f_l(left_free_sizes.size());
+    std::vector<size_t> f_r(right_free_sizes.size());
+    std::vector<size_t> c(contract_sizes.size());
+
+    dynamic_nested_loop(b, batch_sizes, [&](Is batch_indices) {
+        dynamic_nested_loop(f_l, left_free_sizes, [&](Is left_free_indices) {
+           dynamic_nested_loop(f_r, right_free_sizes, [&](Is right_free_indices) {
+               dynamic_nested_loop(c, contract_sizes, [&](Is contract_indices) {
+                   // value[b, f_l, f_r] += left[b, f_l, c] * right[b, f_r, c]
+                    double x = left_access(batch_indices, left_free_indices, contract_indices)
+                        * right_access(batch_indices, right_free_indices, contract_indices);
+                   new_value[i] += x;
+               });
+               i++;
+           });
+        });
+    });
+
+    return array_t {type_t {type.get_dtype(), std::move(shape)}, std::move(new_value)};
+}
+
 
 const type_t& array_t::get_type() const {
     return type;
@@ -292,6 +390,10 @@ double array_t::operator[](const std::vector<size_t>& indices) {
 }
 
 double& array_t::access(const std::vector<size_t>& indices) {
+    return value[flatten_index(stride, indices)];
+}
+
+const double& array_t::access(const std::vector<size_t>& indices) const {
     return value[flatten_index(stride, indices)];
 }
 

@@ -149,6 +149,7 @@ public:
     }
 
     double& access(const std::vector<size_t>& indices);
+    const double& access(const std::vector<size_t>& indices) const;
 
     array_t operator+(const array_t& other) const;
     array_t operator-(const array_t& other) const;

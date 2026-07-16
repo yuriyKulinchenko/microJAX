@@ -159,4 +159,34 @@ inline bool is_identity_permutation(const std::vector<size_t>& permutation) {
     return true;
 }
 
+template<typename F>
+void dynamic_nested_loop(std::vector<size_t>& indices, const std::vector<size_t>& bounds, F f) {
+    if (bounds.size() == 0) {
+        f(bounds);
+        return;
+    }
+
+    // precondition: indices.size() == bounds.size()
+    std::ranges::fill(indices, 0);
+
+    while (true) {
+        f(indices);
+        for (size_t j = indices.size(); j--> 0;) {
+            if (indices[j] < bounds[j] - 1) {
+                indices[j]++;
+                break;
+            }
+            if (j == 0) return;
+            indices[j] = 0;
+        }
+    }
+}
+
+class cartesian_product_iterator {
+public:
+
+private:
+
+};
+
 #endif //HELPER_H

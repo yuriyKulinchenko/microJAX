@@ -19,7 +19,21 @@ void switch_example();
 void scan_example();
 
 int main() {
-    scan_example();
+    using namespace jax;
+    array_t A = array_t{type_t{dtype_t::F32, 3, 3}, {
+        5, 8, 9,
+        1, 6, 7,
+        4, 5, 3
+    }};
+
+    array_t B = array_t{type_t{dtype_t::F32, 3, 3}, {
+        4, 8, 5,
+        5, 1, 1,
+        9, 6, 4
+    }};
+
+    array_t P = A.dot_general(B, {1}, {0}, {}, {});
+    std::cout << "Product: " << P;
     return 0;
 }
 
