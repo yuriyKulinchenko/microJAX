@@ -222,6 +222,17 @@ array_t array_t::exp() const {
     return elementwise_unary_array_op(*this, std::exp<double>);
 }
 
+std::vector<size_t> extract_shape(const std::vector<size_t>& indices, const std::vector<size_t>& shape) {
+    std::vector<size_t> new_shape {};
+    new_shape.reserve(indices.size());
+    std::ranges::transform(indices, std::back_inserter(new_shape), [&](size_t i) {
+       return shape[i];
+    });
+    return new_shape;
+}
+
+using Is = const std::vector<size_t>&;
+
 array_t array_t::dot_general(
     const array_t& other,
     const std::vector<size_t>& left_contract,
@@ -233,17 +244,6 @@ array_t array_t::dot_general(
     std::vector<size_t> right_free = complement(right_batch, right_contract, other.type.get_shape().size());
 
     // For dynamic looping:
-
-    using Is = const std::vector<size_t>&;
-
-    auto extract_shape = [](Is indices, Is shape) -> std::vector<size_t> {
-        std::vector<size_t> new_shape {};
-        new_shape.reserve(indices.size());
-        std::ranges::transform(indices, std::back_inserter(new_shape), [&](size_t i) {
-           return shape[i];
-        });
-        return new_shape;
-    };
 
     const std::vector<size_t> batch_sizes = extract_shape(left_batch, type.get_shape());
     const std::vector<size_t> contract_sizes = extract_shape(left_contract, type.get_shape());
@@ -284,14 +284,15 @@ array_t array_t::dot_general(
     (num_elements(batch_sizes) * num_elements(left_free_sizes) * num_elements(right_free_sizes), 0);
     size_t i = 0;
 
-    std::vector<size_t> batch_indices(batch_sizes.size());
-    std::vector<size_t> left_free_indices(left_free_sizes.size());
-    std::vector<size_t> right_free_indices(right_free_sizes.size());
-    std::vector<size_t> contract_indices(contract_sizes.size());
+    std::vector<size_t> batch_indices(batch_sizes.size(), 0);
+    std::vector<size_t> left_free_indices(left_free_sizes.size(), 0);
+    std::vector<size_t> right_free_indices(right_free_sizes.size(), 0);
+    std::vector<size_t> contract_indices(contract_sizes.size(), 0);
 
     for (auto& b: cartesian_product{batch_indices, batch_sizes}) {
         for (auto& f_l: cartesian_product{left_free_indices, left_free_sizes}) {
             for (auto& f_r: cartesian_product{right_free_indices, right_free_sizes}) {
+                // product[b, f_l, f_r] = sum_c { left[b, f_l, c] * right[b, f_r, c] }
                 for (auto& c: cartesian_product{contract_indices, contract_sizes}) {
                     new_value[i] += left_access(b, f_l, c) * right_access(b, f_r, c);
                 }
@@ -300,9 +301,85 @@ array_t array_t::dot_general(
         }
     }
 
-    return array_t {type_t {type.get_dtype(), std::move(shape)}, std::move(new_value)};
+    return array_t{type_t{type.get_dtype(), std::move(shape)}, std::move(new_value)};
 }
 
+array_t array_t::reduce_sum(const std::vector<size_t>& axes) const {
+    std::vector<size_t> remaining_axes = complement(axes, type.get_shape().size());
+    std::vector<size_t> axes_sizes = extract_shape(axes, type.get_shape());
+    std::vector<size_t> new_shape = extract_shape(remaining_axes, type.get_shape());
+
+    std::vector<size_t> scratch_indices(type.get_shape().size());
+    auto tensor_access = [&](Is remaining_indices, Is sum_indices) -> double {
+        for (size_t i = 0; i < remaining_indices.size(); i++)
+            scratch_indices[remaining_axes[i]] = remaining_indices[i];
+        for (size_t i = 0; i < sum_indices.size(); i++)
+            scratch_indices[axes[i]] = sum_indices[i];
+        return access(scratch_indices);
+    };
+
+    std::vector<size_t> remaining_indices(remaining_axes.size(), 0);
+    std::vector<size_t> sum_indices(axes.size(), 0);
+
+
+    std::vector<double> new_value(num_elements(new_shape), 0);
+    size_t i = 0;
+
+    for (auto& r: cartesian_product{remaining_indices, new_shape}) {
+        // reduce[r] = sum_s {x[r, s]}
+        for (auto& s: cartesian_product{sum_indices, axes_sizes}) {
+            new_value[i] += tensor_access(r, s);
+        }
+        i++;
+    }
+
+    return array_t{type_t{type.get_dtype(), std::move(new_shape)}, std::move(new_value)};
+}
+
+array_t array_t::transpose(const std::vector<size_t>& permutation) const {
+    // permuted_indices[i] = indices[transpose[i]]
+    std::vector<size_t> indices(type.get_shape().size(), 0);
+    std::vector new_shape(permute(type.get_shape(), permutation));
+
+    std::vector<double> new_value {};
+    new_value.reserve(num_elements(new_shape));
+
+    for (auto& is: cartesian_product{indices, new_shape}) {
+        new_value.push_back(access(permute(is, permutation)));
+    }
+
+    return array_t{type_t{type.get_dtype(), std::move(new_shape)}, std::move(new_value)};
+}
+
+array_t array_t::convert_element_type(dtype_t dtype) const {
+    return array_t{type_t{dtype, type.get_shape()}, value};
+}
+
+array_t array_t::broadcast_in_dim(
+    const std::vector<size_t>& shape,
+    const std::vector<size_t>& broadcast_dimensions) const {
+    std::vector<size_t> indices(shape.size(), 0);
+
+    std::vector<double> new_value {};
+    new_value.reserve(num_elements(shape));
+
+    const std::vector<size_t>& src_shape = type.get_shape();
+
+    std::vector<size_t> scratch_indices(broadcast_dimensions.size());
+    auto select = [&](Is is) -> double {
+        for (size_t i = 0; i < broadcast_dimensions.size(); i++) {
+            size_t coord = is[broadcast_dimensions[i]];
+            scratch_indices[i] = (src_shape[i] == 1) ? 0 : coord;
+        }
+        return access(scratch_indices);
+    };
+
+    for (auto& is: cartesian_product{indices, shape}) {
+        new_value.push_back(select(is));
+    }
+
+    return array_t{type_t{type.get_dtype(), shape}, std::move(new_value)};
+}
 
 const type_t& array_t::get_type() const {
     return type;

@@ -124,8 +124,9 @@ inline std::vector<size_t> complement(const std::vector<size_t>& vec1, const std
     return out_vec;
 }
 
-inline std::vector<size_t> permute(const std::vector<size_t>& vec, const std::vector<size_t>& permutation) {
-    std::vector<size_t> permuted(vec.size());
+template<typename T>
+std::vector<T> permute(const std::vector<T>& vec, const std::vector<size_t>& permutation) {
+    std::vector<T> permuted(vec.size());
     for (size_t i = 0; i < vec.size(); i++) {
         permuted[i] = vec[permutation[i]];
     }
@@ -158,6 +159,9 @@ inline bool is_identity_permutation(const std::vector<size_t>& permutation) {
     }
     return true;
 }
+
+// 'cartesian_product' iterates through all elements of an arbitrarily sized
+// cartesian product of finite sets of natural numbers of the form [N_0] x ... x [N_m]
 
 class cartesian_product {
 public:

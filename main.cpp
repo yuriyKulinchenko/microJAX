@@ -32,8 +32,16 @@ int main() {
         9, 6, 4
     }};
 
-    array_t P = A.dot_general(B, {1}, {0}, {}, {});
-    std::cout << "Product: " << P;
+    array_t C = array_t{type_t{dtype_t::F32, 2, 3}, {
+        1, 2, 3,
+        4, 5, 6
+    }};
+
+    std::cout << "Product: " << dot_general(A, B, {1}, {0}, {}, {}) << '\n';
+    std::cout << "Reduction of A: " << reduce_sum(A, {0}) << '\n';
+    std::cout << "Reduction of B along other axes: " << reduce_sum(B, {1}) << '\n';
+    std::cout << "C: " << C << '\n';
+    std::cout << "C transposed: " << transpose(C, {1, 0}) << '\n';
     return 0;
 }
 
