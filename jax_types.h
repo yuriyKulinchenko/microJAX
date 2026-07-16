@@ -72,6 +72,8 @@ public:
     [[nodiscard]] dtype_t get_dtype() const;
     [[nodiscard]] const std::vector<size_t>& get_shape() const;
 
+    void set_dtype(dtype_t dtype);
+
 private:
     dtype_t dtype;
     std::vector<size_t> shape;
@@ -151,10 +153,21 @@ public:
     double& access(const std::vector<size_t>& indices);
     const double& access(const std::vector<size_t>& indices) const;
 
+    template<typename F>
+    array_t binary_op(const array_t& other, F f) const;
+
     array_t operator+(const array_t& other) const;
     array_t operator-(const array_t& other) const;
     array_t operator*(const array_t& other) const;
     array_t operator/(const array_t& other) const;
+
+    array_t operator==(const array_t& other) const;
+    array_t operator!=(const array_t& other) const;
+    array_t operator<(const array_t& other) const;
+    array_t operator<=(const array_t& other) const;
+    array_t operator>(const array_t& other) const;
+    array_t operator>=(const array_t& other) const;
+
 
     [[nodiscard]] array_t sin() const;
     [[nodiscard]] array_t cos() const;
