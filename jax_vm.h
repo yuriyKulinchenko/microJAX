@@ -140,12 +140,11 @@ private:
     }
 
     void populate_literal_buffer(const equation& eq) {
-        literal_buffer.erase(literal_buffer.begin(), literal_buffer.end());
-        literal_buffer.reserve(eq.get_input().size());
+        literal_buffer.assign(eq.get_input().size(), std::nullopt);
         for (size_t i = 0; i < eq.get_input().size(); i++) {
             if (eq.get_input(i).is<literal_t>()) {
                 auto& literal = eq.get_input(i).get_literal();
-                literal_buffer[i] = std::make_unique<array_t>(literal_to_array(literal));
+                literal_buffer[i] = literal_to_array(literal);
             }
         }
     }
@@ -176,7 +175,7 @@ private:
 
     const expression& jaxpr;
     std::vector<std::unique_ptr<array_t>> values;
-    std::vector<std::unique_ptr<array_t>> literal_buffer;
+    std::vector<std::optional<array_t>> literal_buffer;
 };
 
 
