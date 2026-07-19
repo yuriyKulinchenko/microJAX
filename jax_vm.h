@@ -49,15 +49,15 @@ public:
                 case SUB: execute_binary_op<(&array_t::operator-)>(eq); break;
                 case MUL: execute_binary_op<(&array_t::operator*)>(eq); break;
                 case DIV: execute_binary_op<(&array_t::operator/)>(eq); break;
-                case EQ: execute_binary_op<(&array_t::operator==)>(eq); break;
-                case NE: execute_binary_op<(&array_t::operator!=)>(eq); break;
                 case LT: execute_binary_op<(&array_t::operator<)>(eq); break;
                 case LE: execute_binary_op<(&array_t::operator<=)>(eq); break;
                 case GT: execute_binary_op<(&array_t::operator>)>(eq); break;
                 case GE: execute_binary_op<(&array_t::operator>=)>(eq); break;
+                case EQ: execute_binary_op<(&array_t::elementwise_equal)>(eq); break;
+                case NE: execute_binary_op<(&array_t::elementwise_not_equal)>(eq); break;
 
                 case DOT_GENERAL: {
-                    check_fixed_arity(eq, 1);
+                    check_fixed_arity(eq, 2);
                     auto& [l_c, r_c, l_b, r_b] = std::get<dot_general_params>(eq.get_params());
                     emplace_variable(eq.get_output(0),
                         get_input(eq, 0).dot_general(get_input(eq, 1), l_c, r_c, l_b, r_b));
@@ -93,13 +93,45 @@ public:
                     break;
                 }
 
+                case COND: {
+                    // Switch on the first index:
+                    const array_t& array = get_input(eq, 0);
+                    if (!array.get_type().get_shape().empty()) {
+                        throw std::logic_error(
+                            "Error: expect first argument of 'cond' to be a scalar");
+                    }
+
+                    if (!is_integral(array.get_type().get_dtype())) {
+                        throw std::logic_error(
+                            "Error: expect first argument of 'cond' to have an integral dtype");
+                    }
+
+                    size_t index = static_cast<size_t>(array.get_value()[0]);
+                    auto& branches = std::get<cond_params>(eq.get_params()).branches;
+
+                    if (index >= branches.size()) {
+                        throw formatted_error(
+                            "Error: branch index in 'cond' is {}, but there are only {} branches",
+                            index, branches.size());
+                    }
+
+                    jax_vm vm(branches[index]);
+                    auto outputs = vm.run(std::views::iota(0ul, eq.get_input().size())
+                        | std::views::transform([&](size_t i) -> array_t {
+                        return get_input(eq, i);
+                    }) | std::ranges::to<std::vector<array_t>>());
+
+
+                    for (const auto& [output_var, output_array]: std::views::zip(eq.get_output(), outputs)) {
+                        emplace_variable(output_var, std::move(output_array));
+                    }
+                }
+
                 default: {
                     throw std::logic_error("Error: not implemented");
                 }
             }
         }
-
-        // Return the output:
 
         return jaxpr.outvals | std::views::transform([this](const value& val) -> array_t {
             if (val.is<literal_t>()) {

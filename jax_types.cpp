@@ -415,12 +415,22 @@ namespace jax {
     BINARY_OP(*);
     BINARY_OP(/);
 
-    BINARY_COMPARE_OP(==);
-    BINARY_COMPARE_OP(!=);
     BINARY_COMPARE_OP(<);
     BINARY_COMPARE_OP(<=);
     BINARY_COMPARE_OP(>);
     BINARY_COMPARE_OP(>=);
+
+    array_t array_t::elementwise_equal(const array_t& other) const {
+        return binary_op(other, [](double x, double y) {return x == y ? 1. : 0.;});
+    }
+
+    array_t array_t::elementwise_not_equal(const array_t& other) const {
+        return binary_op(other, [](double x, double y) {return x != y ? 1. : 0.;});
+    }
+
+    bool array_t::operator==(const array_t& other) const {
+        return type == other.type && value == other.value;
+    }
 
     const type_t& array_t::get_type() const {
         return type;

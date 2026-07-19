@@ -155,13 +155,15 @@ public:
     template<typename F>
     array_t binary_op(const array_t& other, F f) const;
 
+    bool operator==(const array_t& other) const;
+
     array_t operator+(const array_t& other) const;
     array_t operator-(const array_t& other) const;
     array_t operator*(const array_t& other) const;
     array_t operator/(const array_t& other) const;
 
-    array_t operator==(const array_t& other) const;
-    array_t operator!=(const array_t& other) const;
+    array_t elementwise_equal(const array_t& other) const;
+    array_t elementwise_not_equal(const array_t& other) const;
     array_t operator<(const array_t& other) const;
     array_t operator<=(const array_t& other) const;
     array_t operator>(const array_t& other) const;
