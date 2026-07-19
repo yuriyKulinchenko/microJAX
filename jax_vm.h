@@ -33,8 +33,6 @@ public:
         }
 
         for (auto& eq: jaxpr.equations) {
-            // TODO: Check arity of each op
-            // TODO: Check type of each op
             populate_literal_buffer(eq);
             switch (eq.get_op()) {
                 using enum primitive_op;
@@ -43,18 +41,18 @@ public:
                 case COS: execute_unary_op<(&array_t::cos)>(eq); break;
                 case EXP: execute_unary_op<(&array_t::exp)>(eq); break;
                 case LOG: execute_unary_op<(&array_t::log)>(eq); break;
-                case NEG: execute_unary_op<(&array_t::negate)>(eq); break;
+                case NEG: execute_unary_op<(&array_t::operator-)>(eq); break;
 
                 case ADD: execute_binary_op<(&array_t::operator+)>(eq); break;
                 case SUB: execute_binary_op<(&array_t::operator-)>(eq); break;
                 case MUL: execute_binary_op<(&array_t::operator*)>(eq); break;
                 case DIV: execute_binary_op<(&array_t::operator/)>(eq); break;
-                case LT: execute_binary_op<(&array_t::operator<)>(eq); break;
-                case LE: execute_binary_op<(&array_t::operator<=)>(eq); break;
-                case GT: execute_binary_op<(&array_t::operator>)>(eq); break;
-                case GE: execute_binary_op<(&array_t::operator>=)>(eq); break;
-                case EQ: execute_binary_op<(&array_t::elementwise_equal)>(eq); break;
-                case NE: execute_binary_op<(&array_t::elementwise_not_equal)>(eq); break;
+                case LT: execute_binary_comparison_op<(&array_t::operator<)>(eq); break;
+                case LE: execute_binary_comparison_op<(&array_t::operator<=)>(eq); break;
+                case GT: execute_binary_comparison_op<(&array_t::operator>)>(eq); break;
+                case GE: execute_binary_comparison_op<(&array_t::operator>=)>(eq); break;
+                case EQ: execute_binary_comparison_op<(&array_t::elementwise_equal)>(eq); break;
+                case NE: execute_binary_comparison_op<(&array_t::elementwise_not_equal)>(eq); break;
 
                 case DOT_GENERAL: {
                     check_fixed_arity(eq, 2);
@@ -196,11 +194,24 @@ private:
     template<array_t (array_t::*op)() const>
     void execute_unary_op(const equation& eq) {
         check_fixed_arity(eq, 1);
+        if (eq.get_input(0).get_dtype() == dtype_t::BOOL) {
+            throw std::logic_error("Error: cannot execute unary op on boolean argument");
+        }
         emplace_variable(eq.get_output(0), (get_input(eq, 0).*op)());
     }
 
     template<array_t (array_t::*op)(const array_t&) const>
     void execute_binary_op(const equation& eq) {
+        if (eq.get_input(0).get_dtype() != eq.get_input(1).get_dtype()) {
+            throw std::logic_error("Error: can only execute binary op on arguments of the same type");
+        }
+
+        check_fixed_arity(eq, 2);
+        emplace_variable(eq.get_output(0), (get_input(eq, 0).*op)(get_input(eq, 1)));
+    }
+
+    template<array_t (array_t::*op)(const array_t&) const>
+    void execute_binary_comparison_op(const equation& eq) {
         check_fixed_arity(eq, 2);
         emplace_variable(eq.get_output(0), (get_input(eq, 0).*op)(get_input(eq, 1)));
     }
@@ -210,5 +221,24 @@ private:
     std::vector<std::optional<array_t>> literal_buffer;
 };
 
+template<bool single_output=true>
+auto invoke_vm(const expression& jaxpr, const std::vector<array_t>& input) {
+    jax_vm vm{jaxpr};
+    if constexpr (single_output) {
+        return vm.run(input)[0];
+    } else {
+        return vm.run(input);
+    }
+}
+
+template<bool single_output=true>
+auto invoke_vm(const expression& jaxpr, const array_t& input) {
+    jax_vm vm{jaxpr};
+    if constexpr (single_output) {
+        return vm.run(std::vector{input})[0];
+    } else {
+        return vm.run(std::vector{input});
+    }
+}
 
 #endif //MICROJAX_JAX_VM_H

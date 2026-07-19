@@ -136,7 +136,7 @@ public:
     static array_t build_fill(type_t type, double value);
 
     // ReSharper disable once CppNonExplicitConvertingConstructor
-    array_t(f32 value);
+    array_t(double value);
 
     // Quite inefficient, use sparingly
     double operator[](std::same_as<size_t> auto... indices) {
@@ -155,26 +155,26 @@ public:
     template<typename F>
     array_t binary_op(const array_t& other, F f) const;
 
-    bool operator==(const array_t& other) const;
+    [[nodiscard]] bool operator==(const array_t& other) const;
 
-    array_t operator+(const array_t& other) const;
-    array_t operator-(const array_t& other) const;
-    array_t operator*(const array_t& other) const;
-    array_t operator/(const array_t& other) const;
+    [[nodiscard]] array_t operator+(const array_t& other) const;
+    [[nodiscard]] array_t operator-(const array_t& other) const;
+    [[nodiscard]] array_t operator*(const array_t& other) const;
+    [[nodiscard]] array_t operator/(const array_t& other) const;
 
-    array_t elementwise_equal(const array_t& other) const;
-    array_t elementwise_not_equal(const array_t& other) const;
-    array_t operator<(const array_t& other) const;
-    array_t operator<=(const array_t& other) const;
-    array_t operator>(const array_t& other) const;
-    array_t operator>=(const array_t& other) const;
+    [[nodiscard]] array_t elementwise_equal(const array_t& other) const;
+    [[nodiscard]] array_t elementwise_not_equal(const array_t& other) const;
+    [[nodiscard]] array_t operator<(const array_t& other) const;
+    [[nodiscard]] array_t operator<=(const array_t& other) const;
+    [[nodiscard]] array_t operator>(const array_t& other) const;
+    [[nodiscard]] array_t operator>=(const array_t& other) const;
 
 
     [[nodiscard]] array_t sin() const;
     [[nodiscard]] array_t cos() const;
     [[nodiscard]] array_t exp() const;
     [[nodiscard]] array_t log() const;
-    [[nodiscard]] array_t negate() const;
+    [[nodiscard]] array_t operator-() const;
 
     [[nodiscard]] array_t transpose(const std::vector<size_t>& permutation) const;
     [[nodiscard]] array_t reduce_sum(const std::vector<size_t>& axes) const;

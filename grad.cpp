@@ -280,25 +280,25 @@ void grad_class::propagate_adjoints(equation& eq) {
         }
 
         case LOG: {
-            // derivative of y = log(x) is 1/x:
-            // TODO: implement log
             auto& output_var = eq.get_output(0);
             auto* output_adj = get_adjoint(output_var);
             if (!output_adj) break;
 
             auto& input_var = eq.get_input(0).get_var();
 
-            auto f_prime_var = fresh_var(output_var.get_type());
+            // derivative of y = log(x) is 1/x
+
+            value broadcasted_1 = broadcasted_value(input_var.get_type(), 1);
+            auto f_prime_var = fresh_var(input_var.get_type());
 
             output_expr.equations.emplace_back(
-                std::vector{value{input_var}},
+                std::vector{broadcasted_1, value{input_var}},
                 std::vector{f_prime_var},
                 DIV
             );
 
             update_adjoint(input_var, value{f_prime_var}, *output_adj);
-
-            exit(1);
+            break;
         }
 
         case NEG: {

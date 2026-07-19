@@ -142,8 +142,8 @@ namespace jax {
         check_single_value();
     }
 
-    array_t::array_t(f32 value)
-    : array_t(type_t{dtype_t::F32}, std::vector<double>{value}) {}
+    array_t::array_t(double value)
+    : array_t(type_t{dtype_t::F32}, std::vector{value}) {}
 
     array_t array_t::build(dtype_t dtype, std::vector<size_t> shape,
         const std::function<double(const std::vector<size_t>&)>& f) {
@@ -169,7 +169,7 @@ namespace jax {
 
     array_t array_t::build_fill(type_t type, double value) {
         size_t count = num_elements(type.get_shape());
-        return array_t{std::move(type), std::vector<double>(count, value)};
+        return array_t{std::move(type), std::vector(count, value)};
     }
 
     void array_t::compute_strides() {
@@ -194,6 +194,10 @@ namespace jax {
         return new_array;
     }
 
+    array_t array_t::operator-() const {
+        return elementwise_unary_array_op<[](double x){return -x;}>(*this);
+    }
+
     array_t array_t::sin() const {
         return elementwise_unary_array_op<std::sin>(*this);
     }
@@ -208,10 +212,6 @@ namespace jax {
 
     array_t array_t::log() const {
         return elementwise_unary_array_op<std::log>(*this);
-    }
-
-    array_t array_t::negate() const {
-        return elementwise_unary_array_op<[](auto x){return -x;}>(*this);
     }
 
     std::vector<size_t> extract_shape(const std::vector<size_t>& indices, const std::vector<size_t>& shape) {

@@ -212,6 +212,10 @@ ELEMENTWISE_BINARY_OP(<=, jax::primitive_op::LE, dtype_t::BOOL);
 ELEMENTWISE_BINARY_OP(>, jax::primitive_op::GT, dtype_t::BOOL);
 ELEMENTWISE_BINARY_OP(>=, jax::primitive_op::GE, dtype_t::BOOL);
 
+jaxpr_tracer jaxpr_tracer::operator-() const {
+    return unary_op(value{var}, primitive_op::NEG, builder);
+}
+
 jaxpr_tracer jaxpr_tracer::sin() const {
     return unary_op(value{var}, primitive_op::SIN, builder);
 }

@@ -40,6 +40,7 @@ public:
     [[nodiscard]] jaxpr_tracer cos() const;
     [[nodiscard]] jaxpr_tracer exp() const;
     [[nodiscard]] jaxpr_tracer log() const;
+    [[nodiscard]] jaxpr_tracer operator-() const;
 
     [[nodiscard]] jaxpr_tracer transpose(std::vector<size_t> permutation) const;
     [[nodiscard]] jaxpr_tracer reduce_sum(std::vector<size_t> axes) const;
@@ -82,6 +83,14 @@ public:
     [[nodiscard]] jax::expression&& get_jaxpr();
     jax::expression jaxpr;
 };
+
+template<std::convertible_to<jax::type_t>... Types, typename F>
+jax::expression get_jaxpr(F&& f, Types&&... types) {
+    jaxpr_builder builder {};
+    // TODO: register_output should be able to handle tuples
+    builder.register_output(f(builder.register_tracer(types)...));
+    return builder.get_jaxpr();
+}
 
 jax::value promote(const jax::value& val, jax::dtype_t dtype, jaxpr_builder& builder);
 
