@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include<vector>
 
 #include "grad.h"
 #include "jax_functions.h"
@@ -160,12 +161,160 @@ TEST(grad_closed_form, log) {
         return log(x);
     }, type_t{F32}))};
 
-    EXPECT_EQ(invoke_vm(log_derivative_jaxpr, input), array_t{1}/input);
+    EXPECT_EQ(invoke_vm(log_derivative_jaxpr, input), array_t{1.} / input);
 };
 
-TEST(grad_closed_form, arithmetic) {
+TEST(grad_closed_form, arithmetic_add) {
     using namespace jax;
     using enum dtype_t;
-    // TODO: test for arithmetic operations
+
+    // Testing derivative of z = x + y:
+
+    array_t x {0.78};
+    array_t y {5.32};
+
+    expression sum_grad_jaxpr {grad(get_jaxpr([](auto x, auto y) {
+        return x + y;
+    }, type_t{F32}, type_t{F32}))};
+
+    std::vector<array_t> expected_output {1., 1.};
+    EXPECT_EQ(invoke_vm<false>(sum_grad_jaxpr, {x, y}), expected_output);
 }
+
+TEST(grad_closed_form, arithmetic_sub) {
+    using namespace jax;
+    using enum dtype_t;
+
+    // Testing derivative of z = x - y:
+
+    array_t x {0.78};
+    array_t y {5.32};
+
+    expression sum_grad_jaxpr {grad(get_jaxpr([](auto x, auto y) {
+        return x - y;
+    }, type_t{F32}, type_t{F32}))};
+
+    std::vector<array_t> expected_output {1., -1.};
+    EXPECT_EQ(invoke_vm<false>(sum_grad_jaxpr, {x, y}), expected_output);
+}
+
+TEST(grad_closed_form, arithmetic_mul) {
+    using namespace jax;
+    using enum dtype_t;
+
+    // Testing derivative of z = x * y:
+
+    array_t x {0.78};
+    array_t y {5.32};
+
+    expression sum_grad_jaxpr {grad(get_jaxpr([](auto x, auto y) {
+        return x * y;
+    }, type_t{F32}, type_t{F32}))};
+
+    std::vector expected_output {y, x};
+    EXPECT_EQ(invoke_vm<false>(sum_grad_jaxpr, {x, y}), expected_output);
+}
+
+TEST(grad_closed_form, arithmetic_div) {
+    using namespace jax;
+    using enum dtype_t;
+
+    // Testing derivative of z = x / y:
+
+    array_t x {0.78};
+    array_t y {5.32};
+
+    expression sum_grad_jaxpr {grad(get_jaxpr([](auto x, auto y) {
+        return x / y;
+    }, type_t{F32}, type_t{F32}))};
+
+    auto grad_result = invoke_vm<false>(sum_grad_jaxpr, {x, y});
+    std::vector expected_output {array_t{1} / y, - x / (y * y)};
+
+    EXPECT_EQ(grad_result, expected_output);
+}
+
+TEST(grad_closed_form, composition_1) {
+    using namespace jax;
+    using enum dtype_t;
+
+    // Testing derivative of y = exp(sin(x)):
+    // dy/dx = cos(x) * exp(sin(x))
+
+    array_t input {0.78};
+
+    expression derivative_jaxpr {grad(get_jaxpr([](auto x) {
+        return exp(sin(x));
+    }, type_t{F32}))};
+
+    EXPECT_EQ(invoke_vm(derivative_jaxpr, input), cos(input) * exp(sin(input)));
+}
+
+TEST(grad_closed_form, composition_2) {
+    using namespace jax;
+    using enum dtype_t;
+
+    // Testing derivative of y = log(cos(x) + 2):
+    // dy/dx = -sin(x) / (cos(x) + 2)
+
+    array_t input {0.78};
+
+    expression derivative_jaxpr {grad(get_jaxpr([](auto x) {
+        return log(cos(x) + 2);
+    }, type_t{F32}))};
+
+    EXPECT_EQ(invoke_vm(derivative_jaxpr, input),
+              -sin(input) / (cos(input) + 2));
+}
+
+TEST(grad_closed_form, composition_3) {
+    using namespace jax;
+    using enum dtype_t;
+
+    // Testing derivative of z = sin(x * y) * exp(y):
+    // dz/dx = y * cos(x * y) * exp(y)
+    // dz/dy = (x * cos(x * y) + sin(x * y)) * exp(y)
+
+    array_t x {0.78};
+    array_t y {1.23};
+
+    expression grad_jaxpr {grad(get_jaxpr([](auto x, auto y) {
+        return sin(x * y) * exp(y);
+    }, type_t{F32}, type_t{F32}))};
+
+    std::vector expected_output {
+        y * cos(x * y) * exp(y),
+        (x * cos(x * y) + sin(x * y)) * exp(y)
+    };
+
+    EXPECT_EQ(invoke_vm<false>(grad_jaxpr, {x, y}), expected_output);
+}
+
+TEST(grad_closed_form, composition_4) {
+    using namespace jax;
+    using enum dtype_t;
+
+    // Testing derivative of z = exp(x - y) / log(x + y):
+    // let u = exp(x - y), v = log(x + y)
+    // dz/dx = (u * v - u / (x + y)) / (v * v)
+    // dz/dy = (-u * v - u / (x + y)) / (v * v)
+
+    array_t x {2.34};
+    array_t y {1.11};
+
+    expression grad_jaxpr {grad(get_jaxpr([](auto x, auto y) {
+        return exp(x - y) / log(x + y);
+    }, type_t{F32}, type_t{F32}))};
+
+    auto u = exp(x - y);
+    auto v = log(x + y);
+    std::vector expected_output {
+        (u * v - u / (x + y)) / (v * v),
+        (-u * v - u / (x + y)) / (v * v)
+    };
+
+    EXPECT_EQ(invoke_vm<false>(grad_jaxpr, {x, y}), expected_output);
+}
+
+// Real challenge is testing finite differences
 

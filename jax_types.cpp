@@ -420,16 +420,34 @@ namespace jax {
     BINARY_COMPARE_OP(>);
     BINARY_COMPARE_OP(>=);
 
+    // TODO: expose this globally somehow
+    double epsilon = 1. / static_cast<double>(1 << 10);
+
+    bool double_eq(double x, double y) {
+        return std::abs(x - y) < epsilon;
+    }
+
     array_t array_t::elementwise_equal(const array_t& other) const {
-        return binary_op(other, [](double x, double y) {return x == y ? 1. : 0.;});
+        return binary_op(other, [](double x, double y) -> double {
+            return double_eq(x, y) ? 1 : 0;
+        });
     }
 
     array_t array_t::elementwise_not_equal(const array_t& other) const {
-        return binary_op(other, [](double x, double y) {return x != y ? 1. : 0.;});
+        return binary_op(other, [](double x, double y) -> double {
+            return !double_eq(x, y) >= epsilon ? 1 : 0;
+        });
     }
 
     bool array_t::operator==(const array_t& other) const {
-        return type == other.type && value == other.value;
+        if (type != other.type) return false;
+        if (is_integral(type.get_dtype())) return value == other.value;
+
+        for (auto [x, y]: std::views::zip(value, other.value)) {
+            if (!double_eq(x, y)) return false;
+        }
+
+        return true;
     }
 
     const type_t& array_t::get_type() const {
