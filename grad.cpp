@@ -427,7 +427,7 @@ void grad_class::propagate_adjoints(equation& eq) {
                     NEG
                 );
 
-                update_adjoint(y_val.get_var(), value{negated_quotient_val});
+                update_adjoint(y_val.get_var(), value{negated_quotient_val}, *output_adj);
             }
 
             break;

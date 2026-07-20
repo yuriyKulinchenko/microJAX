@@ -114,7 +114,8 @@ public:
                     }
 
                     jax_vm vm(branches[index]);
-                    auto outputs = vm.run(std::views::iota(0ul, eq.get_input().size())
+                    // Skip input 0 (the branch index): the branch's invars are the values only.
+                    auto outputs = vm.run(std::views::iota(1ul, eq.get_input().size())
                         | std::views::transform([&](size_t i) -> array_t {
                         return get_input(eq, i);
                     }) | std::ranges::to<std::vector<array_t>>());
@@ -123,6 +124,7 @@ public:
                     for (const auto& [output_var, output_array]: std::views::zip(eq.get_output(), outputs)) {
                         emplace_variable(output_var, std::move(output_array));
                     }
+                    break;
                 }
 
                 default: {

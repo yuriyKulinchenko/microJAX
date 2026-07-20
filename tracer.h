@@ -89,7 +89,9 @@ jax::expression get_jaxpr(F&& f, Types&&... types) {
     jaxpr_builder builder {};
     // TODO: register_output should be able to handle tuples
     builder.register_output(f(builder.register_tracer(types)...));
-    return builder.get_jaxpr();
+    auto jaxpr = builder.get_jaxpr();
+    jaxpr.eliminate_dead_code();
+    return jaxpr;
 }
 
 jax::value promote(const jax::value& val, jax::dtype_t dtype, jaxpr_builder& builder);
