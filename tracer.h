@@ -99,7 +99,6 @@ public:
 template<std::convertible_to<jax::type_t>... Types, typename F>
 jax::expression get_jaxpr(F&& f, Types&&... types) {
     jaxpr_builder builder {};
-    // TODO: register_output should be able to handle tuples
     builder.register_output(f(builder.register_tracer(types)...));
     auto jaxpr = builder.get_jaxpr();
     jaxpr.eliminate_dead_code();

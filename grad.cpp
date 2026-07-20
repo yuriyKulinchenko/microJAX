@@ -1000,19 +1000,9 @@ expression grad_class::find_grad() {
         throw formatted_error("Error: expected 1 output, received {}", input_expr.outvals.size());
     }
 
-    // TODO: literal outputs should technically be allowed, with a trivial adjoint of 0
+    auto& outval = input_expr.outvals[0];
 
-    if (input_expr.outvals[0].is<literal_t>()) {
-        throw std::logic_error("Error: expected output to be variable, received literal");
-    }
-
-    const var_t& output_var = input_expr.outvals[0].get_var();
-
-    if (is_integral(output_var.get_dtype())) {
-        throw std::logic_error("Error: output variable must have non-integral dtype");
-    }
-
-    if (output_var.get_shape().size() != 0) {
+    if (outval.get_shape().size() != 0) {
         throw std::logic_error("Error: shape of output variable must be scalar");
     }
 
@@ -1041,7 +1031,10 @@ expression grad_class::find_grad() {
 
     // Seed the adjoint of the initial equation:
 
-    update_adjoint(output_var, broadcasted_value(output_var.get_type(), 1));
+    if (!outval.is<literal_t>() && !is_integral(outval.get_dtype())) {
+        const var_t& output_var = input_expr.outvals[0].get_var();
+        update_adjoint(output_var, broadcasted_value(output_var.get_type(), 1));
+    }
 
     // perform a backward pass:
 
@@ -1066,8 +1059,6 @@ expression grad_class::find_grad() {
 }
 
 expression grad_class::find_grad_general() {
-    // Add inputs (x0, ..., xn)
-
     // Add constvars:
 
     output_expr.consts = input_expr.consts;
