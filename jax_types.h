@@ -333,6 +333,7 @@ struct cond_params {
 struct scan_params {
     expression jaxpr;
     size_t length;
+    size_t num_consts;
     size_t num_carry;
     bool reverse;
 };

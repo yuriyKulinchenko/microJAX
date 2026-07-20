@@ -22,42 +22,7 @@ void switch_example();
 void scan_example();
 
 int main() {
-    using namespace jax;
-    using enum dtype_t;
-    array_t A = array_t{type_t{F32, 3, 3}, {
-        5, 8, 9,
-        1, 6, 7,
-        4, 5, 3
-    }};
-
-    array_t B = array_t{type_t{F32, 3, 3}, {
-        4, 8, 5,
-        5, 1, 1,
-        9, 6, 4
-    }};
-
-    array_t C = array_t{type_t{F32, 2, 3}, {
-        1, 2, 3,
-        4, 5, 6
-    }};
-
-    // std::cout << "Product: " << dot_general(A, B, {1}, {0}, {}, {}) << '\n';
-    // std::cout << "Reduction of A: " << reduce_sum(A, {0}) << '\n';
-    // std::cout << "Reduction of B along other axes: " << reduce_sum(B, {1}) << '\n';
-    // std::cout << "C: " << C << '\n';
-    // std::cout << "C transposed: " << transpose(C, {1, 0}) << '\n';
-
-    jaxpr_builder builder {};
-    auto x = builder.register_tracer(F32, 4);
-    builder.register_output(softmax(x));
-    auto jaxpr = builder.get_jaxpr();
-
-    std::cout << "Softmax jaxpr: " << jaxpr;
-
-    array_t input = array_t{type_t{F32, 4}, {1, 2, 3, 4}};
-
-    jax_vm vm(jaxpr);
-    std::cout << vm.run({input})[0];
+    scan_example();
     return 0;
 }
 
@@ -81,10 +46,10 @@ void scan_example() {
     };
 
     auto results = scan(
-        builder,
         f,
-        std::array{acc0, cnt0},
-        std::array{xs, ws},
+        std::tuple{},
+        std::tuple{acc0, cnt0},
+        std::tuple{xs, ws},
         5
     );
 

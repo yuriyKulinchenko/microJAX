@@ -23,6 +23,10 @@ public:
         return var;
     }
 
+    [[nodiscard]] jaxpr_builder& get_builder() {
+        return builder;
+    }
+
 #define BINARY_OP(op)                                                               \
     friend jaxpr_tracer operator op (const jaxpr_tracer&, const jaxpr_tracer&);     \
     friend jaxpr_tracer operator op (const jaxpr_tracer&, const jax::array_t&);     \
@@ -73,6 +77,14 @@ public:
     void register_output(const jax::literal_t& literal);
     void register_output(const jax::var_t& var);
     void register_output(const jax::array_t& array);
+
+    template<typename TupleContainer>
+    void register_output(const TupleContainer& container) {
+        constexpr size_t tuple_size = std::tuple_size_v<TupleContainer>;
+        std::invoke([&]<size_t... Is>(std::index_sequence<Is...>) {
+            ((register_output(std::get<Is>(container))), ...);
+        }, std::make_index_sequence<tuple_size>());
+    }
 
 
     template<std::convertible_to<size_t>... Args>
@@ -151,111 +163,132 @@ jaxpr_tracer jaxpr_tracer::switch_on(
     return {builder, std::move(output_var)};
 }
 
-template<size_t L>
-using jaxpr_array = std::array<jaxpr_tracer, L>;
+namespace jax {
+    template<typename F, typename... Consts, typename... Carry, typename...Xs>
+    auto tracer_scan(jaxpr_builder& builder, F f, std::tuple<Consts...> consts,
+        std::tuple<Carry...> carry, std::tuple<Xs...> xs, size_t L, bool reverse) {
 
-template<size_t num_carry, size_t num_xs, typename F>
-auto scan(
-    jaxpr_builder& builder,
-    F f,
-    jaxpr_array<num_carry> carry,
-    jaxpr_array<num_xs> xs,
-    size_t L, bool reverse=false) {
+        // elements of xs, ys are stacked
+        // consts, carry pass through
 
-    jaxpr_builder scan_builder {};
+        // f(carry[i]..., xs[i]...) -> carry, ys[i]...
+        // f : (consts..., carry..., xs[1:]...) -> (carry..., ys[1:]...)
+        // scan(f) : (consts..., carry..., xs...) -> (carry..., ys...)
 
-    auto project = [L](const jax::type_t& type) -> jax::type_t {
-        auto& old_shape = type.get_shape();
-        if (old_shape.size() == 0) {
-            throw std::logic_error("Error: 'xs' in scan cannot be a literal, it must be a tensor");
+
+        std::vector<value> input {};
+        std::vector<var_t> output {};
+
+        auto get_value = [&]<typename T>(const T& x) -> value {
+            // If tuple[i] is an array, call array_value
+            // if tuple[i] is a tracer, wrap with a value
+            if constexpr(std::convertible_to<T, array_t>) {
+                return array_value(x, builder);
+            } else {
+                // jaxpr_tracer
+                return value{x.get_var()};
+            }
+        };
+
+        // Populate consts, carry, xs:
+
+        constexpr size_t input_count = sizeof...(Consts) + sizeof...(Carry) + sizeof...(Xs);
+        input.reserve(input_count);
+
+        std::invoke([&]<size_t... Is>(std::index_sequence<Is...>) {
+            ((input.push_back(get_value(std::get<Is>(consts)))), ...);
+
+        }, std::make_index_sequence<sizeof...(Consts)>());
+
+        std::invoke([&]<size_t... Is>(std::index_sequence<Is...>) {
+            ((input.push_back(get_value(std::get<Is>(carry)))), ...);
+
+        }, std::make_index_sequence<sizeof...(Carry)>());
+
+        std::invoke([&]<size_t... Is>(std::index_sequence<Is...>) {
+            ((input.push_back(get_value(std::get<Is>(xs)))), ...);
+
+        }, std::make_index_sequence<sizeof...(Xs)>());
+
+        // Here, I need to fetch and reduce the types. This will be done with a tuple:
+
+        constexpr size_t carry_offset = sizeof...(Consts);
+        constexpr size_t xs_offset = carry_offset + sizeof...(Carry);
+
+        auto unstack = [](const type_t& type) -> type_t {
+            return type_t{type.get_dtype(),
+                std::vector<size_t>{type.get_shape().begin() + 1, type.get_shape().end()}};
+        };
+
+        auto stack = [L](const type_t& type) -> type_t {
+            std::vector new_shape {L};
+            new_shape.reserve(type.get_shape().size() + 1);
+            for (size_t x: type.get_shape()) new_shape.push_back(x);
+            return type_t{type.get_dtype(), std::move(new_shape)};
+        };
+
+        auto get_input_type = [&]<size_t i>() -> type_t {
+            if constexpr(i < carry_offset) {
+                return std::get<i>(consts).get_type();
+            } else if constexpr(i < xs_offset) {
+                return std::get<i - carry_offset>(carry).get_type();
+            } else {
+                return unstack(std::get<i - xs_offset>(xs).get_type());
+            }
+        };
+
+        auto input_types = std::invoke([&]<size_t... Is>(std::index_sequence<Is...>)
+            -> std::array<type_t, input_count> {
+            return {get_input_type.template operator()<Is>()...};
+        }, std::make_index_sequence<input_count>());
+
+        using output_types_t = apply_result_t<F, std::array<jaxpr_tracer, input_count>>;
+
+        constexpr size_t output_count = std::tuple_size_v<output_types_t>;
+
+        // The final outputs of inner_jaxpr inform the output type signature:
+        // f : (consts..., carry..., xs[1:]...) -> (carry..., ys[1:]...)
+        // scan(f) : (consts..., carry..., xs...) -> (carry..., ys...)
+
+        expression inner_jaxpr = std::apply([&](auto&... types) {
+            return get_jaxpr(f, types...);
+        }, input_types);
+
+        std::array<type_t, output_count> output_types = std::invoke([&]<size_t... Is>(std::index_sequence<Is...>)
+            -> std::array<type_t, output_count> {
+            return {(
+                Is < sizeof...(Carry) ? inner_jaxpr.outvals[Is].get_type():
+                stack(inner_jaxpr.outvals[Is].get_type())
+            )...};
+        }, std::make_index_sequence<output_count>());
+
+        // Populate the output:
+
+        output.reserve(output_count);
+
+        for (const type_t& type: output_types) {
+            output.emplace_back(std::move(builder.jaxpr.fresh_var(type)));
         }
-        if (old_shape[0] != L) {
-            throw formatted_error(
-                "Error: expected leading rank size to be {}, instead got {} in 'xs'",
-                L, old_shape[0]
-                );
-        }
 
-        std::vector<size_t> new_shape
-        {old_shape.begin() + 1, old_shape.end()};
-        return jax::type_t{type.get_dtype(), std::move(new_shape)};
-    };
+        std::array<jaxpr_tracer, output_count> output_tracers
+        = std::invoke([&]<size_t... Is>(std::index_sequence<Is...>)
+            -> std::array<jaxpr_tracer, output_count> {
+            return {(jaxpr_tracer{builder, output[Is]})...};
+        }, std::make_index_sequence<output_count>());
 
-    auto project_inverse = [L](const jax::type_t& type) -> jax::type_t {
-        std::vector new_shape {L};
-        new_shape.reserve(type.get_shape().size() + 1);
-        for (size_t x: type.get_shape()) new_shape.push_back(x);
-        return jax::type_t{type.get_dtype(), std::move(new_shape)};
-    };
+         builder.jaxpr.equations.emplace_back(
+         std::move(input), std::move(output),
+         primitive_op::SCAN,
+         scan_params{
+             .jaxpr = std::move(inner_jaxpr),
+             .length = L,
+             .num_consts = sizeof...(Consts),
+             .num_carry = sizeof...(Carry),
+             .reverse = reverse}
+        );
 
-    // Build each input tracer directly via register_tracer, selecting the source
-    // with if constexpr so there is no ternary common-type materialization.
-    auto make_input_tracer = [&]<size_t I>() -> jaxpr_tracer {
-        if constexpr (I < num_carry) {
-            return scan_builder.register_tracer(carry[I].get_type());
-        } else {
-            return scan_builder.register_tracer(project(xs[I - num_carry].get_type()));
-        }
-    };
-
-    jaxpr_array<num_carry + num_xs> input_tracers = std::invoke(
-        [&]<std::size_t... Is>(std::index_sequence<Is...>) {
-            return jaxpr_array<num_carry + num_xs> {
-                make_input_tracer.template operator()<Is>()...
-            };
-    }, std::make_index_sequence<num_carry + num_xs>{});
-
-    auto output_tracers = std::apply(f, input_tracers);
-
-    constexpr size_t num_total_out = std::tuple_size_v<decltype(output_tracers)>;
-    static_assert(num_total_out >= num_carry,
-        "scan body must return at least num_carry outputs (the updated carries)");
-    constexpr size_t num_ys = num_total_out - num_carry;
-
-    for (auto& output_tracer: output_tracers) {
-        scan_builder.register_output(output_tracer);
+        return output_tracers;
     }
-
-    std::vector<jax::var_t> output {};
-    output.reserve(num_carry + num_ys);
-
-    for (size_t i = 0; i < num_carry; i++) {
-        output.push_back(builder.jaxpr.fresh_var(output_tracers[i].get_type()));
-    }
-
-    for (size_t i = 0; i < num_ys; i++) {
-        output.push_back(builder.jaxpr.fresh_var(
-            project_inverse(output_tracers[num_carry + i].get_type())));
-    }
-
-    std::vector<jax::value> input {};
-    input.reserve(num_carry + num_xs);
-
-    for (auto& tracer: carry) {
-        input.push_back(jax::value{tracer.get_var()});
-    }
-
-    for (auto& tracer: xs) {
-       input.push_back(jax::value{tracer.get_var()});
-    }
-
-    jaxpr_array<num_carry + num_ys> global_output_tracers = std::invoke(
-        [&]<std::size_t... Is>(std::index_sequence<Is...>) {
-            return jaxpr_array<num_carry + num_ys> {
-                    jaxpr_tracer{builder, output[Is]}...
-            };
-    }, std::make_index_sequence<num_carry + num_ys>{});
-
-    builder.jaxpr.equations.emplace_back(
-        std::move(input), std::move(output),
-        jax::primitive_op::SCAN,
-        jax::scan_params{
-            .jaxpr = scan_builder.get_jaxpr(),
-            .length = L,
-            .num_carry = num_carry,
-            .reverse = reverse}
-    );
-
-    return global_output_tracers;
 }
+
 #endif //TRACER_H

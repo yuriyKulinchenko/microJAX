@@ -217,4 +217,26 @@ private:
 
 };
 
+template <typename F, typename Container>
+struct apply_result;
+
+template <typename F, typename... Ts>
+struct apply_result<F, std::tuple<Ts...>>
+    : std::invoke_result<F, Ts...> {};
+
+// helper: repeat T for each index in the sequence
+template <typename F, typename T, typename Seq>
+struct array_apply_result;
+
+template <typename F, typename T, std::size_t... Is>
+struct array_apply_result<F, T, std::index_sequence<Is...>>
+    : std::invoke_result<F, decltype((void)Is, std::declval<T>())...> {};
+
+template <typename F, typename T, std::size_t N>
+struct apply_result<F, std::array<T, N>>
+    : array_apply_result<F, T, std::make_index_sequence<N>> {};
+
+template <typename F, typename Container>
+using apply_result_t = apply_result<F, Container>::type;
+
 #endif //HELPER_H

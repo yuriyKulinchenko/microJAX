@@ -154,19 +154,6 @@ value promote(const value& val, dtype_t dtype, jaxpr_builder& builder) {
     return val;
 }
 
-value array_value(const array_t& array, jaxpr_builder& builder) {
-    if (const std::optional<literal_t> literal = array.get_literal()) {
-        return value{*literal};
-    }
-
-
-    // Otherwise, add it to the array of consts:
-    builder.jaxpr.consts.push_back(array);
-    var_t fresh_var = builder.jaxpr.fresh_var(array.get_type());
-    builder.jaxpr.constvars.push_back(fresh_var);
-    return value{std::move(fresh_var)};
-}
-
 #define ELEMENTWISE_BINARY_OP_TRACER_TRACER(op, op_name, output_dtype)                          \
 jaxpr_tracer operator op (const jaxpr_tracer& t1, const jaxpr_tracer& t2) {                     \
     dtype_t dtype = resultant_type(t1.get_type().get_dtype(), t2.get_type().get_dtype());       \
