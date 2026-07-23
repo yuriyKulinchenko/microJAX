@@ -105,6 +105,10 @@ namespace jax {
         return shape;
     }
 
+    std::vector<size_t> &type_t::get_shape() {
+        return shape;
+    }
+
     void type_t::set_dtype(const dtype_t new_dtype) {
         dtype = new_dtype;
     }
@@ -130,6 +134,8 @@ namespace jax {
     dtype_t var_t::get_dtype() const {
         return type.get_dtype();
     }
+
+    array_t::array_t(): type(dtype_t::F32), value({0.}){}
 
     array_t::array_t(type_t type, std::vector<double> value):
     type(std::move(type)),
@@ -454,6 +460,10 @@ namespace jax {
         return type;
     }
 
+    type_t& array_t::get_type() {
+        return type;
+    }
+
     const std::vector<double>& array_t::get_value() const {
         return value;
     }
@@ -479,7 +489,7 @@ namespace jax {
         return shape;
     }
 
-    array_span::array_span(const array_t& array, const std::vector<size_t>& indices) {
+    array_span_t::array_span_t(const array_t& array, const std::vector<size_t>& indices) {
         type.dtype = array.type.get_dtype();
 
         size_t i_0 = 0;
@@ -498,19 +508,19 @@ namespace jax {
         value = std::span{array.value.begin() + i_0, total_size};
     }
 
-    double array_span::operator[](const std::vector<size_t>& indices) const {
+    double array_span_t::operator[](const std::vector<size_t>& indices) const {
         return access(indices);
     }
 
-    const double& array_span::access(const std::vector<size_t>& indices) const {
+    const double& array_span_t::access(const std::vector<size_t>& indices) const {
         return value[flatten_index(stride, indices)];
     }
 
-    const type_span& array_span::get_type() const {
+    const type_span& array_span_t::get_type() const {
         return type;
     }
 
-    std::span<const double> array_span::get_value() const {
+    std::span<const double> array_span_t::get_value() const {
         return value;
     }
 
@@ -542,6 +552,27 @@ namespace jax {
 
     const double& array_t::access(const std::vector<size_t>& indices) const {
         return value[flatten_index(stride, indices)];
+    }
+
+    array_t array_t::slice(const std::vector<size_t>& indices) {
+        if (indices.empty()) return *this;
+
+        if (indices.size() > type.get_shape().size()) {
+            throw formatted_error("Error: cannot access indices given by {}", indices);
+        }
+
+        std::vector<size_t> new_shape{type.get_shape().begin() + indices.size(), type.get_shape().end()};
+        size_t start_index = 0;
+        for (size_t i = 0; i < indices.size(); i++) {
+            start_index += stride[i] * indices[i];
+        }
+
+        // Now, calculate the size:
+        size_t new_size = stride[indices.size() - 1];
+
+        std::vector<double> new_value {value.begin() + start_index, value.begin() + start_index + new_size};
+
+        return array_t{type_t{type.get_dtype(), std::move(new_shape)}, std::move(new_value)};
     }
 
     bool array_t::has_single_value(f64 val) const {

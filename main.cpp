@@ -34,15 +34,15 @@ void scan_example() {
 
     auto acc0 = builder.register_tracer(F32, 3);
     auto cnt0 = builder.register_tracer(F32);
-    auto xs   = builder.register_tracer(F32, 5, 3);
-    auto ws   = builder.register_tracer(F32, 5);
+    auto xs = builder.register_tracer(F32, 5, 3);
+    auto ws = builder.register_tracer(F32, 5);
 
-    auto f = [&](jaxpr_tracer acc, jaxpr_tracer cnt, jaxpr_tracer x, jaxpr_tracer w) {
-        auto wx   = x * w;
+    auto f = [](auto acc, auto cnt, auto x, auto w) {
+        auto wx  = x * w;
         auto acc2 = acc + wx;
         auto cnt2 = cnt + w;
-        auto y    = acc2 + x;      // per-step output: f32[3]
-        return std::array{acc2, cnt2, y};
+        auto y = acc2 + x;      // per-step output: f32[3]
+        return std::tuple{acc2, cnt2, y};
     };
 
     auto results = scan(
@@ -52,6 +52,24 @@ void scan_example() {
         std::tuple{xs, ws},
         5
     );
+
+    array_t acc0_literal = broadcast_in_dim(array_t{5}, {3}, {});
+    array_t cnt0_literal = array_t{4};
+    std::cout << "cnt_0_literal: " << cnt0_literal << '\n';
+    array_t xs_literal = broadcast_in_dim(array_t{12}, {5, 3}, {});
+    array_t ws_literal = broadcast_in_dim(array_t{13}, {5}, {});
+
+    auto fixed_results = scan(
+        f,
+        std::tuple{},
+        std::tuple{acc0_literal, cnt0_literal},
+        std::tuple{xs_literal, ws_literal},
+        5
+    );
+
+    emit_typed_array(std::cout, std::get<0>(fixed_results)) << '\n';
+    emit_typed_array(std::cout, std::get<1>(fixed_results)) << '\n';
+    emit_typed_array(std::cout, std::get<2>(fixed_results)) << '\n';
 
     auto z = results[0] * results[1] - results[2]; // f32[5,3]
     builder.register_output(reduce_sum(z, {0, 1}));

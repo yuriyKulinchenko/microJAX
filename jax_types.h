@@ -52,7 +52,7 @@ dtype_t resultant_type(dtype_t t1, dtype_t t2);
 class type_t {
 public:
 
-    explicit type_t(dtype_t dtype);
+    type_t(dtype_t dtype);
 
     type_t(dtype_t dtype, std::vector<size_t> shape);
 
@@ -71,6 +71,7 @@ public:
 
     [[nodiscard]] dtype_t get_dtype() const;
     [[nodiscard]] const std::vector<size_t>& get_shape() const;
+    [[nodiscard]] std::vector<size_t>& get_shape();
 
     void set_dtype(dtype_t new_dtype);
 
@@ -127,7 +128,9 @@ private:
 
 class array_t {
 public:
-    friend class array_span;
+    friend class array_span_t;
+
+    array_t();
     array_t(type_t type, std::vector<double> value);
 
     static array_t build(dtype_t dtype, std::vector<size_t> shape,
@@ -192,17 +195,19 @@ public:
         const std::vector<size_t>& right_batch) const;
 
     [[nodiscard]] const type_t& get_type() const;
+    [[nodiscard]] type_t& get_type();
     [[nodiscard]] const std::vector<double>& get_value() const;
     [[nodiscard]] std::vector<double>& get_value();
     [[nodiscard]] std::optional<literal_t> get_literal() const;
 
     void set_type(type_t new_type);
 
+    [[nodiscard]] array_t slice(const std::vector<size_t>& indices);
     [[nodiscard]] bool has_single_value(f64 val) const;
     [[nodiscard]] bool has_single_value() const;
+    void compute_strides();
 
 private:
-    void compute_strides();
     void check_single_value();
 
     type_t type;
@@ -221,10 +226,10 @@ struct type_span {
 };
 
 // Non-owning view, potentially to a subset of the array
-class array_span {
+class array_span_t {
 public:
 
-    array_span(const array_t& array, const std::vector<size_t>& indices);
+    array_span_t(const array_t& array, const std::vector<size_t>& indices);
 
     double operator[](std::same_as<size_t> auto... indices) const {
         return access(indices...);

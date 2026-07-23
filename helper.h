@@ -239,4 +239,28 @@ struct apply_result<F, std::array<T, N>>
 template <typename F, typename Container>
 using apply_result_t = apply_result<F, Container>::type;
 
+template<typename T, typename Tuple>
+struct append_tuple;
+
+template<typename T, typename... Ts>
+struct append_tuple<T, std::tuple<Ts...>> {
+    using type = std::tuple<T, Ts...>;
+};
+
+template<typename Array>
+struct array_to_tuple_struct;
+
+template<typename T>
+struct array_to_tuple_struct<std::array<T, 0>> {
+    using type = std::tuple<>;
+};
+
+template<typename T, size_t N>
+struct array_to_tuple_struct<std::array<T, N>> {
+    using type = append_tuple<T, typename array_to_tuple_struct<std::array<T, N - 1>>::type>::type;
+};
+
+template<typename Array>
+using array_to_tuple_t = array_to_tuple_struct<Array>::type;
+
 #endif //HELPER_H

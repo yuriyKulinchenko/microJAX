@@ -253,7 +253,8 @@ namespace jax {
             return get_jaxpr(f, types...);
         }, input_types);
 
-        std::array<type_t, output_count> output_types = std::invoke([&]<size_t... Is>(std::index_sequence<Is...>)
+        std::array<type_t, output_count> output_types
+        = std::invoke([&]<size_t... Is>(std::index_sequence<Is...>)
             -> std::array<type_t, output_count> {
             return {(
                 Is < sizeof...(Carry) ? inner_jaxpr.outvals[Is].get_type():
