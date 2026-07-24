@@ -31,48 +31,48 @@ void scan_example() {
     using enum dtype_t;
 
     jaxpr_builder builder {};
-
+    auto k0 = builder.register_tracer(F32, 3);
+    auto k1 = builder.register_tracer(F32, 2, 3);
+    auto k2 = builder.register_tracer(F32);
     auto acc0 = builder.register_tracer(F32, 3);
-    auto cnt0 = builder.register_tracer(F32);
-    auto xs = builder.register_tracer(F32, 5, 3);
-    auto ws = builder.register_tracer(F32, 5);
+    auto sum0 = builder.register_tracer(F32);
+    auto mat0 = builder.register_tracer(F32, 2, 3);
+    auto xs = builder.register_tracer(F32, 4, 3);
+    auto ws = builder.register_tracer(F32, 4);
+    auto ms = builder.register_tracer(F32, 4, 2, 3);
 
-    auto f = [](auto acc, auto cnt, auto x, auto w) {
-        auto wx  = x * w;
-        auto acc2 = acc + wx;
-        auto cnt2 = cnt + w;
-        auto y = acc2 + x;      // per-step output: f32[3]
-        return std::tuple{acc2, cnt2, y};
+    auto f = [](auto k0, auto k1, auto k2, auto acc, auto sum, auto mat, auto x, auto w, auto m) {
+        auto scaled = x * w;
+        auto acc2 = acc + scaled * k0;
+        auto sum2 = sum + w * k2;
+        auto mat2 = mat * k1 + m;
+        auto y0 = acc2 + x * k0;
+        auto y1 = reduce_sum(mat2, {1}) + sum2;
+        auto y2 = mat2 * k1;
+        return std::tuple{acc2, sum2, mat2, y0, y1, y2};
     };
 
     auto results = scan(
         f,
-        std::tuple{},
-        std::tuple{acc0, cnt0},
-        std::tuple{xs, ws},
-        5
+        std::tuple{k0, k1, k2},
+        std::tuple{acc0, sum0, mat0},
+        std::tuple{xs, ws, ms},
+        4
     );
 
-    array_t acc0_literal = broadcast_in_dim(array_t{5}, {3}, {});
-    array_t cnt0_literal = array_t{4};
-    std::cout << "cnt_0_literal: " << cnt0_literal << '\n';
-    array_t xs_literal = broadcast_in_dim(array_t{12}, {5, 3}, {});
-    array_t ws_literal = broadcast_in_dim(array_t{13}, {5}, {});
-
-    auto fixed_results = scan(
-        f,
-        std::tuple{},
-        std::tuple{acc0_literal, cnt0_literal},
-        std::tuple{xs_literal, ws_literal},
-        5
-    );
-
-    emit_typed_array(std::cout, std::get<0>(fixed_results)) << '\n';
-    emit_typed_array(std::cout, std::get<1>(fixed_results)) << '\n';
-    emit_typed_array(std::cout, std::get<2>(fixed_results)) << '\n';
-
-    auto z = std::get<0>(results) * std::get<1>(results) - std::get<2>(results); // f32[5,3]
-    builder.register_output(reduce_sum(z, {0, 1}));
+    auto acc_f = std::get<0>(results);
+    auto sum_f = std::get<1>(results);
+    auto mat_f = std::get<2>(results);
+    auto y0s = std::get<3>(results);
+    auto y1s = std::get<4>(results);
+    auto y2s = std::get<5>(results);
+    auto a = reduce_sum(acc_f * k0, {0});
+    auto b = sum_f * k2;
+    auto c = reduce_sum(mat_f * k1, {0, 1});
+    auto d = reduce_sum(y0s * xs, {0, 1});
+    auto e = reduce_sum(y1s, {0, 1}) * reduce_sum(ws, {0});
+    auto g = reduce_sum(y2s * ms, {0, 1, 2});
+    builder.register_output(a + b + c + d + e + g);
 
     auto jaxpr = builder.get_jaxpr();
     std::cout << "Original expression:\n" << jaxpr;
@@ -80,43 +80,44 @@ void scan_example() {
     auto grad_jaxpr = grad(jaxpr);
     std::cout << "Grad expression:\n" << grad_jaxpr;
 
-    grad_jaxpr.eliminate_dead_code();
-    std::cout << "DCE grad expression:\n" << grad_jaxpr;
+    // grad_jaxpr.eliminate_dead_code();
+    // std::cout << "DCE grad expression:\n" << grad_jaxpr;
 }
 
 void switch_example() {
-     using namespace jax;
-     using enum dtype_t;
-     // Construct tracer:
-     jaxpr_builder builder {};
+    using namespace jax;
+    using enum dtype_t;
+    // Construct tracer:
+    jaxpr_builder builder {};
 
-     auto i = builder.register_tracer(I32);
-     auto j = builder.register_tracer(I32);
-     auto x = builder.register_tracer(F32, 2, 2);
-     auto y = builder.register_tracer(F64, 2, 2);
-     auto k = array_t::build(F32, {4, 2, 2}, [](auto& is) -> double {
+    auto i = builder.register_tracer(I32);
+    auto j = builder.register_tracer(I32);
+    auto x = builder.register_tracer(F32, 2, 2);
+    auto y = builder.register_tracer(F64, 2, 2);
+    auto k = array_t::build(F32, {4, 2, 2}, [](auto& is) -> double {
          return is[0] + is[1] + is[2];
      });
 
-     auto z = switch_on(i < j, std::tuple{
+    auto z = switch_on(i < j, std::tuple{
          [&](auto& x, auto& y){return x + y - k;},
          [&](auto& x, auto& y){return x * y * k;}
-     }, x, y);
+    }, x, y);
 
-     /*
+    /*
 
-     auto z = scan(f, L, num_carry, std::tuple{carry}, std::tuple{xs})
+    auto z = scan(f, L, num_carry, std::tuple{carry}, std::tuple{xs})
 
-     */
+    */
 
-     builder.register_output(reduce_sum(z, {0, 1}));
+    builder.register_output(reduce_sum(z, {0, 1}));
 
-     auto jaxpr = builder.get_jaxpr();
-     std::cout << "Original expression:\n" << jaxpr;
+    auto jaxpr = builder.get_jaxpr();
+    std::cout << "Original expression:\n" << jaxpr;
 
-     auto grad_jaxpr = grad(jaxpr);
-     std::cout << "Grad expression:\n" << grad_jaxpr;
+    auto grad_jaxpr = grad(jaxpr);
 
-     grad_jaxpr.eliminate_dead_code();
-     std::cout << "DCE grad expression:\n" << grad_jaxpr;
+    std::cout << "Grad expression:\n" << grad_jaxpr;
+
+    grad_jaxpr.eliminate_dead_code();
+    std::cout << "DCE grad expression:\n" << grad_jaxpr;
 }

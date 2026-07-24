@@ -68,12 +68,21 @@ void grad_class::introduce_adjoint(const var_t& var) {
     active_adjoint_map[var.get_id()] = false;
 }
 
-value *grad_class::get_adjoint(const var_t& var) {
+value* grad_class::get_adjoint(const var_t& var) {
     if (auto it = variable_adjoint_map.find(var.get_id());
         it != variable_adjoint_map.end()) {
         return &it->second;
     }
     return nullptr;
+}
+
+value grad_class::get_adjoint_value(const var_t& var) {
+    value* val = get_adjoint(var);
+    if (val) {
+        return *val;
+    }
+
+    return broadcasted_value(var.get_type(), 0);
 }
 
 bool grad_class::adjoint_is_active(const var_t& var, bool apply_update) {
@@ -834,93 +843,139 @@ void grad_class::propagate_adjoints(equation& eq) {
             if (!should_propagate(input_vals, output_vars)) break;
 
             // On a high level, the adjoint update will require emitting:
-            // scan(f', reverse=true)(c', C, X, Y')
-            // where c' is a carry, and C, X and Y are xs parameters.
-            // this will require some re-arrangement of the parameters in f'
+            // scan(f', reverse=true)(k, 0, c', C, X, Y')
+            // where k is the constant, c' is a carry,
+            // and C, X and Y are xs parameters.
+            // The 0 parameter is the first value of k'_acc
+            // this will require some re-arrangement of the parameters in f',
+            // as well as the threading through of k'_acc
 
             auto& params = std::get<scan_params>(eq.get_params());
             expression f_prime = grad_general(params.jaxpr);
 
-            // Now, the inputs to f_prime need to be re-arranged.
-            // They will be in the form f'(c, x, c', y')
-            // They need to be in the form f(c', c, x, y')
+            // f_prime needs to be modified. First, the order of inputs must change.
+            // They will be in the form f'(k, c, x, c', y')
+            // They need to be in the form f'(k, k'_acc, c', c, x, y')
 
+            size_t num_consts = params.num_consts;
             size_t num_carry = params.num_carry;
-            size_t num_xs = eq.get_input().size() - num_carry;
+            size_t num_xs = eq.get_input().size() - num_consts - num_carry;
             size_t num_ys = eq.get_output().size() - num_carry;
 
             std::vector<var_t> permuted_invars {};
             permuted_invars.reserve(f_prime.invars.size());
 
-            size_t offset = num_carry + num_xs;
-            for (size_t i = 0; i < num_carry; i++) {
+            size_t offset = 0;
+            for (size_t i = 0; i < num_consts; i++) {
                 permuted_invars.push_back(std::move(f_prime.invars[offset + i]));
-                // f(c')
+                // f(k)
             }
 
-            offset = 0;
-            for (size_t i = 0; i < num_carry; i++) {
-                permuted_invars.push_back(std::move(f_prime.invars[offset + i]));
-                // f(c', c)
+            for (size_t i = 0; i < num_consts; i++) {
+                permuted_invars.push_back(f_prime.fresh_var(permuted_invars[i].get_type()));
+                // f(k, k'_acc)
             }
 
-            offset = num_xs;
+            offset = num_consts + num_carry + num_xs;
+            for (size_t i = 0; i < num_carry; i++) {
+                permuted_invars.push_back(std::move(f_prime.invars[offset + i]));
+                // f(k, k'_acc, c')
+            }
+
+            offset = num_consts;
+            for (size_t i = 0; i < num_carry; i++) {
+                permuted_invars.push_back(std::move(f_prime.invars[offset + i]));
+                // f(k, k'_acc, c', c)
+            }
+
+            offset = num_consts + num_carry;
             for (size_t i = 0; i < num_xs; i++) {
                 permuted_invars.push_back(std::move(f_prime.invars[offset + i]));
-                // f(c', c, x)
+                // f(k, k'_acc, c', c, x)
             }
 
-            offset = 2 * num_carry + num_xs;
+            offset = num_consts + num_carry + num_xs + num_carry;
             for (size_t i = 0; i < num_ys; i++) {
                 permuted_invars.push_back(std::move(f_prime.invars[offset + i]));
-                // f(c', c, x, y)
+                // f(k, k'_acc, c', c, x, y')
             }
 
             f_prime.invars = permuted_invars;
 
-            // Now that f_prime is constructed, the inputs and outputs need to be found in the right order
-            // The inputs will be (c', C, X, Y').
-            // c', X and Y' are easily recoverable as output adjoints or inputs.
+            // f_prime needs to be modified to correctly accumulate k'_acc
+            // This will involve adding some addition instructions.
+
+            for (size_t i = 0; i < num_consts; i++) {
+                auto& const_outval = f_prime.outvals[i];
+                // I need to add const_outval to its corresponding k'_acc
+                auto& const_accumulator = f_prime.invars[num_consts + i];
+
+                var_t updated_adjoint = f_prime.fresh_var(const_accumulator.get_type());
+
+                f_prime.equations.emplace_back(
+                    std::vector{value{const_accumulator}, const_outval},
+                    std::vector {updated_adjoint},
+                    ADD
+                );
+
+                f_prime.outvals[i] = value{updated_adjoint};
+            }
+
+
+
+            // The inputs to scan(f_prime, reverse=true) will be (k, 0, c', C, X, Y').
+            // k, c', X and Y' are easily recoverable as output adjoints or inputs.
             // However, C will require performing the scan_carry_transform, which changes the signature
-            // from (c, X) -> (c, Y) to (c, X) -> (c, Y, C):
+            // from (k, c, X) -> (c, Y) to (c, X) -> (c, Y, C):
 
             scan_carry_transform(eq);
 
             std::vector<value> inputs{};
 
-            // First goal is to pass all c adjoints:
+            // Pass k:
+            offset = 0;
+            for (size_t i = 0; i < num_consts; i++) {
+                auto& k_val = eq.get_input(offset + i);
+                inputs.push_back(k_val);
+            }
+
+            // Pass initial value of k'_acc (0):
+            offset = 0;
+            for (size_t i = 0; i < num_consts; i++) {
+                auto& k_val = eq.get_input(offset + i);
+                inputs.push_back(broadcasted_value(k_val.get_type(), 0));
+            }
+
+
+            // Pass c':
+            offset = 0;
             for (size_t i = 0; i < num_carry; i++) {
-                auto& c_var = eq.get_output(i);
-                if (value* c_adjoint = get_adjoint(c_var)) {
-                    inputs.push_back(*c_adjoint);
-                } else {
-                    inputs.push_back(broadcasted_value(c_var.get_type(), 0.));
-                }
+                auto& c_var = eq.get_output(offset + i);
+                inputs.push_back(get_adjoint_value(c_var));
             }
 
             // Pass C:
+            offset = num_carry + num_ys;
             for (size_t i = 0; i < num_carry; i++) {
-                auto& C = eq.get_output(num_carry + num_ys + i);
+                auto& C = eq.get_output(offset + i);
                 inputs.push_back(value{C});
             }
 
             // Pass X:
+            offset = num_consts + num_carry;
             for (size_t i = 0; i < num_xs; i++) {
-                auto& X = eq.get_input(num_carry + i);
+                auto& X = eq.get_input(offset + i);
                 inputs.push_back(X);
             }
 
             // Pass Y':
+            offset = num_carry;
             for (size_t i = 0; i < num_ys; i++) {
-                auto& y_var = eq.get_output(num_carry + i);
-                if (value* y_adjoint = get_adjoint(y_var)) {
-                    inputs.push_back(*y_adjoint);
-                } else {
-                    inputs.push_back(broadcasted_value(y_var.get_type(), 1.));
-                }
+                auto& y_var = eq.get_output(offset + i);
+                inputs.push_back(get_adjoint_value(y_var));
             }
 
-            // The output will be updates to (c_0', X')
+            // The output will be updates to (k', c_0', X'):
 
             std::vector<var_t> outputs {};
             for (auto& inval: eq.get_input()) {
@@ -934,7 +989,8 @@ void grad_class::propagate_adjoints(equation& eq) {
                 scan_params{
                     .jaxpr = f_prime,
                     .length = params.length,
-                    .num_carry = params.num_carry,
+                    .num_consts = params.num_consts,
+                    .num_carry = params.num_consts + params.num_carry,
                     .reverse = !params.reverse
                 }
             );
@@ -966,9 +1022,9 @@ void grad_class::propagate_adjoints(equation& eq) {
 }
 
 void grad_class::scan_carry_transform(equation& eq) {
-    // If the equation is a scan, the type signature has to be modified
-    // scan(f)(c, X) = (c, Y)
-    // scan-carry(f)(c, X) = (c, Y, C)
+    // If the equation is a scan, the type signature has to be modified.
+    // scan(f): (k, c, X) -> (c, Y)
+    // scan-carry(f): (k, c, X) -> (c, Y, C)
 
     auto& params = std::get<scan_params>(eq.get_params());
     auto& jaxpr = params.jaxpr;
@@ -976,12 +1032,12 @@ void grad_class::scan_carry_transform(equation& eq) {
     // Fetch the first 'num_carry' inputs to expr, push them to the output
 
     for (size_t i = 0; i < params.num_carry; i++) {
-        jaxpr.outvals.push_back(value{jaxpr.invars[i]});
+        jaxpr.outvals.push_back(value{jaxpr.invars[params.num_consts + i]});
     }
 
     // Modify the set of output variables:
     for (size_t i = 0; i < params.num_carry; i++) {
-        auto& type = jaxpr.invars[i].get_type();
+        auto& type = jaxpr.invars[params.num_consts + i].get_type();
         std::vector new_shape {params.length};
         new_shape.reserve(type.get_shape().size() + 1);
 

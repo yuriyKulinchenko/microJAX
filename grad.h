@@ -35,6 +35,9 @@ class grad_class {
     void introduce_adjoint(const jax::var_t& var);
     jax::value* get_adjoint(const jax::var_t& var);
 
+    // Returns a broadcasted 0 if the adjoint does not exist
+    jax::value get_adjoint_value(const jax::var_t& var);
+
     // input_adj_var += val
     void update_adjoint(const jax::var_t& input_adj_var, const jax::value& val);
 
