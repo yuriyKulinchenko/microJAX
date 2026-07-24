@@ -168,6 +168,7 @@ std::ostream& emit_equation(std::ostream& stream, const equation& eq, size_t tab
             stream << "[jaxpr=\n";
             emit_expr(stream, params.jaxpr, tab_count + 1);
             stream << space << "    , length=" << params.length
+            << ", num_consts=" << params.num_consts
             << ", num_carry=" << params.num_carry
             << (params.reverse ? ", reverse=true": "") << ']';
             break;

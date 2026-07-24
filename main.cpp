@@ -71,7 +71,7 @@ void scan_example() {
     emit_typed_array(std::cout, std::get<1>(fixed_results)) << '\n';
     emit_typed_array(std::cout, std::get<2>(fixed_results)) << '\n';
 
-    auto z = results[0] * results[1] - results[2]; // f32[5,3]
+    auto z = std::get<0>(results) * std::get<1>(results) - std::get<2>(results); // f32[5,3]
     builder.register_output(reduce_sum(z, {0, 1}));
 
     auto jaxpr = builder.get_jaxpr();

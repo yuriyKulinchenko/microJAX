@@ -263,4 +263,51 @@ struct array_to_tuple_struct<std::array<T, N>> {
 template<typename Array>
 using array_to_tuple_t = array_to_tuple_struct<Array>::type;
 
+template<typename Tuple, typename T, size_t i = 0>
+struct tuple_find_type_instance;
+
+template<typename T, size_t i>
+struct tuple_find_type_instance<std::tuple<>, T, i> {
+    static constexpr bool exists = false;
+    static constexpr size_t index = i;
+};
+
+template<typename T, size_t i, typename U, typename... Us>
+struct tuple_find_type_instance<std::tuple<U, Us...>, T, i> {
+    static constexpr bool exists = std::convertible_to<T, U>
+    || tuple_find_type_instance<std::tuple<Us...>, T, i + 1>::exists;
+
+    static constexpr size_t index = std::convertible_to<T, U> ? i
+    : tuple_find_type_instance<std::tuple<Us...>, T, i + 1>::index;
+};
+
+template<typename Fallback, typename... Ts>
+struct first_type_struct;
+
+template<typename Fallback>
+struct first_type_struct<Fallback> {
+    using type = Fallback;
+};
+
+template<typename Fallback, typename T, typename... Ts>
+struct first_type_struct<Fallback, T, Ts...> {
+    using type = T;
+};
+
+template<typename... Ts>
+using first_type = first_type_struct<Ts...>::type;
+
+template<typename... Ts>
+std::array<first_type<Ts...>, sizeof...(Ts)> array_to_tuple(std::tuple<Ts...> tuple) {
+
+    auto populate_array = [&]<size_t... Is>(std::index_sequence<Is...>)
+    -> std::array<first_type<Ts...>, sizeof...(Ts)>{
+        return {std::move(std::get<Is>(tuple))...};
+    };
+
+    return populate_array(std::make_index_sequence<sizeof...(Ts)>());
+}
+
+
+
 #endif //HELPER_H

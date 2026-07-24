@@ -270,9 +270,11 @@ namespace jax {
             output.emplace_back(std::move(builder.jaxpr.fresh_var(type)));
         }
 
-        std::array<jaxpr_tracer, output_count> output_tracers
+        using output_tuple_t = array_to_tuple_t<std::array<jaxpr_tracer, output_count>>;
+
+        output_tuple_t output_tracers
         = std::invoke([&]<size_t... Is>(std::index_sequence<Is...>)
-            -> std::array<jaxpr_tracer, output_count> {
+            -> output_tuple_t {
             return {(jaxpr_tracer{builder, output[Is]})...};
         }, std::make_index_sequence<output_count>());
 
