@@ -55,9 +55,23 @@ namespace jax {
     }
 
     template<typename T, typename... Us, typename... Fs>
-    T switch_on(T index, std::tuple<Fs...> branches, Us... values) {
+    T switch_on(T index, std::tuple<Fs...> branches, const Us&... values) {
         return index.switch_on(branches, values...);
     }
+
+    /*
+
+    What should the interface of switch_on be?
+    switch_on(tracer_t, {F1, F2, F3}, tracer_t, tracer_t) -> tracer_t | tuple<tracer_t, ...>
+
+    switch_on takes as input a combination of tracers and array_t instances.
+    It returns the result of applying the sequence of inputs to F1, F2 or F3
+    These should all match!
+
+    What if index is an array_t, but 'values' contains a tracer?
+    */
+
+
 
     template<typename... Ts>
     struct tracer_or_array_tuple_struct {
@@ -106,7 +120,7 @@ namespace jax {
     using first_type = first_type_struct<Ts...>::type;
 
     template<typename... Ts>
-    std::array<first_type<Ts...>, sizeof...(Ts)> array_to_tuple(std::tuple<Ts...> tuple) {
+    std::array<first_type<Ts...>, sizeof...(Ts)> tuple_to_array(std::tuple<Ts...> tuple) {
 
         auto populate_array = [&]<size_t... Is>(std::index_sequence<Is...>)
         -> std::array<first_type<array_t, Ts...>, sizeof...(Ts)>{
@@ -160,8 +174,8 @@ namespace jax {
                 std::move(consts), std::move(carry), std::move(xs), L, reverse);
         } else {
             // Otherwise, convert to array
-            return array_scan(std::move(f), array_to_tuple(std::move(consts)), array_to_tuple(std::move(carry)),
-                array_to_tuple(std::move(xs)), L, reverse);
+            return array_scan(std::move(f), tuple_to_array(std::move(consts)), tuple_to_array(std::move(carry)),
+                tuple_to_array(std::move(xs)), L, reverse);
         }
     }
 }

@@ -62,7 +62,7 @@ public:
         std::vector<size_t> right_batch) const;
 
     template<typename... Fs, typename... Ts>
-    [[nodiscard]] jaxpr_tracer switch_on(std::tuple<Fs...> branches, const Ts&... vals) const;
+    [[nodiscard]] auto switch_on(std::tuple<Fs...> branches, const Ts&... vals) const;
 
 private:
     jax::var_t var;
@@ -108,58 +108,92 @@ jax::expression get_jaxpr(F&& f, Types&&... types) {
 jax::value promote(const jax::value& val, jax::dtype_t dtype, jaxpr_builder& builder);
 
 template<typename... Fs, typename... Ts>
-jaxpr_tracer jaxpr_tracer::switch_on(
-        std::tuple<Fs...> branches,
-        const Ts&... vals) const {
+auto jaxpr_tracer::switch_on(std::tuple<Fs...> branches, const Ts&... vals) const {
     using namespace jax;
+    static_assert(sizeof...(Fs) > 0, "There must be a branch provided to the switch statement");
 
-    // propagate_branch will construct a jaxpr corresponding to each branch:
-    auto propagate_branch = [&](const auto& f) -> expression {
-        jaxpr_builder builder {};
+    // What are the inputs? They are the index parameter followed by the provided vals.
+    // The provided vals are tracers or array_t instances.
+    // The outputs have a shape derived from something
+    // The jaxpr of each function in 'branches' is recursively constructed
+    // This is done with create_jaxpr
 
-        std::array<jaxpr_tracer, sizeof...(Ts)> tracer_inputs
-            {builder.register_tracer(vals.get_type())...};
+    // type(vals) = jaxpr_tracer | array_t
 
-        builder.register_output(std::apply(f, tracer_inputs));
-        return builder.get_jaxpr();
-    };
-
-    auto get_branch_expressions = [&](Fs... branches_) -> std::vector<expression> {
-        return {propagate_branch(branches_)...};
-    };
-
-    std::vector<expression> branch_expressions = std::apply(get_branch_expressions, branches);
-
-
-    if (branch_expressions.size() == 0) {
-        throw std::logic_error("Error: expect at least one branch in switch expression");
-    }
-
-    auto& outvals = branch_expressions[0].outvals;
-
-    for (size_t i = 1; i < branch_expressions.size(); i++) {
-        // Outputs have to match:
-        auto& branch_expression = branch_expressions[i];
-        for (size_t j = 0; j < branch_expression.outvals.size(); j++) {
-            if (outvals[j].get_type() != branch_expression.outvals[j].get_type()) {
-                throw std::logic_error(
-                    "Error: expect outputs to have consistent type signature in branches");
-            }
+    auto transform_to_value = []<typename T>(const T& val) -> value {
+        if constexpr(std::convertible_to<T, jaxpr_tracer>) {
+            return value{val.var};
+        } else if constexpr(std::convertible_to<T, array_t>) {
+            return array_value(val);
         }
-    }
+        std::unreachable();
+    };
+
+    auto transform_to_type = []<typename T>(const T& val) -> type_t {
+        return val.get_type();
+    };
+
+    std::array<value, sizeof...(vals)> non_index_inputs = {transform_to_value(vals)...};
+    std::array<type_t, sizeof...(vals)> input_types = {transform_to_type(vals)...};
+
+    // I need to pass the array of input types to each of the branches:
+
+    auto apply_to_branch = [&]<typename F>(F&& f) -> expression {
+        return std::invoke([&]<size_t... Is>(std::index_sequence<Is...>) -> expression {
+            return get_jaxpr(f, std::get<Is>(input_types)...);
+        }, std::make_index_sequence<sizeof...(vals)>());
+    };
+
+    // For each element of branches, get its jaxpr, and put it in a list:
+
+    std::vector<expression> expression_branches
+    = std::apply([&](auto&&... fs) -> std::vector<expression> {
+        return std::vector{apply_to_branch(fs)...};
+    }, branches);
+
+    // No matter what, switch_on will ALWAYS assume the output is a jaxpr_tracer if there exists even
+    // one input that is a jaxpr_tracer. Here, this is trivially the case, as the index is a jaxpr_tracer
+
+    using F1 = first_type<nullptr_t, Fs...>;
+    static_assert(!std::same_as<F1, nullptr_t>);
+    using output_type = std::invoke_result_t<F1, const Ts&...>;
+
+    // There are 3 options: output_type_t is an array_t, jaxpr_tracer, or std::tuple<...>
 
 
-    var_t output_var {builder.jaxpr.new_var_id(),
-        branch_expressions[0].equations[0].get_output(0).get_type()};
+    std::vector inputs {value{var}}; // First input is the index itself
+    inputs.append_range(non_index_inputs);
+
+    // Outputs are interesting
+    // They have to be created with builder.jaxpr.fresh_var()
+    // However, the types have to be coherent
+    // The types are fetched from the output of expression_branches
+
+    // TODO: For now, I am assuming that all passed branches have the same output
+    // Obviously, this might not be the case
+
+    std::vector<var_t> outputs = expression_branches[0].outvals
+    | std::views::transform([&](const value& val) {
+        return builder.jaxpr.fresh_var(val.get_type());
+    }) | std::ranges::to<std::vector<var_t>>();
 
     builder.jaxpr.equations.emplace_back(
-        std::vector{promote(value{var}, dtype_t::I32, builder), value{vals.get_var()}...},
-        std::vector{output_var},
-        primitive_op::COND,
-        cond_params{std::move(branch_expressions)}
-    );
+        std::move(inputs), std::move(outputs),
+        primitive_op::COND, cond_params{std::move(expression_branches)});
 
-    return {builder, std::move(output_var)};
+    std::vector<var_t>& new_outputs = builder.jaxpr.equations[builder.jaxpr.equations.size() - 1].get_output();
+
+    if constexpr(std::convertible_to<output_type, array_t> || std::convertible_to<output_type, jaxpr_tracer>) {
+        // Simply return the single output.
+        return jaxpr_tracer{builder, new_outputs[0]};
+    } else {
+        // Return multiple outputs.
+        constexpr size_t N = std::tuple_size_v<output_type>;
+        using output_tuple_t = array_to_tuple_t<std::array<jaxpr_tracer, N>>;
+        return std::invoke([&]<size_t... Is>(std::index_sequence<Is...>) {
+            return output_tuple_t {jaxpr_tracer{builder, new_outputs[Is]}...};
+        }, std::make_index_sequence<N>());
+    }
 }
 
 namespace jax {

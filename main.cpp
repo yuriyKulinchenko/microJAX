@@ -22,7 +22,7 @@ void switch_example();
 void scan_example();
 
 int main() {
-    scan_example();
+    switch_example();
     return 0;
 }
 
@@ -99,8 +99,8 @@ void switch_example() {
      });
 
     auto z = switch_on(i < j, std::tuple{
-         [&](auto& x, auto& y){return x + y - k;},
-         [&](auto& x, auto& y){return x * y * k;}
+         [&k](auto&& x_, auto&& y_){return x_ + y_ - k;},
+         [&k](const auto& x_, const auto& y_){return x_ * y_ * k;}
     }, x, y);
 
     /*
@@ -109,7 +109,7 @@ void switch_example() {
 
     */
 
-    builder.register_output(reduce_sum(z, {0, 1}));
+    builder.register_output(reduce_sum(z, {0, 1, 2}));
 
     auto jaxpr = builder.get_jaxpr();
     std::cout << "Original expression:\n" << jaxpr;

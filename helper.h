@@ -294,14 +294,14 @@ struct first_type_struct<Fallback, T, Ts...> {
     using type = T;
 };
 
-template<typename... Ts>
-using first_type = first_type_struct<Ts...>::type;
+template<typename Fallback, typename... Ts>
+using first_type = first_type_struct<Fallback, Ts...>::type;
 
 template<typename... Ts>
-std::array<first_type<Ts...>, sizeof...(Ts)> array_to_tuple(std::tuple<Ts...> tuple) {
+std::array<first_type<nullptr_t, Ts...>, sizeof...(Ts)> tuple_to_array(std::tuple<Ts...> tuple) {
 
     auto populate_array = [&]<size_t... Is>(std::index_sequence<Is...>)
-    -> std::array<first_type<Ts...>, sizeof...(Ts)>{
+    -> std::array<first_type<nullptr_t, Ts...>, sizeof...(Ts)>{
         return {std::move(std::get<Is>(tuple))...};
     };
 

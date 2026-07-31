@@ -818,19 +818,24 @@ void grad_class::propagate_adjoints(equation& eq) {
                 outputs.push_back(fresh_var(input_val.get_type()));
             }
 
+            // Gather the (input var, adjoint var) pairs before emplacing:
+            // update_adjoint below emplaces into output_expr.equations, so no
+            // reference into that vector may be held across the update loop.
+            std::vector<std::pair<var_t, var_t>> adjoint_updates {};
+            for (size_t i = 1; i < input_vals.size(); i++) {
+                if (input_vals[i].is<var_t>()) {
+                    adjoint_updates.emplace_back(input_vals[i].get_var(), outputs[i - 1]);
+                }
+            }
+
             output_expr.equations.emplace_back(
                 std::move(inputs),
                 std::move(outputs),
                 COND,
                 cond_params{std::move(transformed_branches)});
 
-            // Now, update the input adjoints:
-
-            auto& updates = output_expr.equations[output_expr.equations.size() - 1].get_output();
-
-            for (size_t i = 1; i < input_vals.size(); i++) {
-                if (!input_vals[i].is<var_t>()) continue;
-                update_adjoint(input_vals[i].get_var(), value{updates[i - 1]});
+            for (auto& [input_var, adj_var] : adjoint_updates) {
+                update_adjoint(input_var, value{adj_var});
             }
 
             break;
