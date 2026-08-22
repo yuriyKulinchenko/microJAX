@@ -578,6 +578,7 @@ namespace jax {
     // Precondition is that 'slice' and 'indices' are both valid.
     void array_t::add_slice(const std::vector<size_t>& indices, const array_t& slice) {
         size_t start_index = 0;
+        has_single_value_ = false;
         for (size_t i = 0; i < indices.size(); i++) {
             start_index += stride[i] * indices[i];
         }

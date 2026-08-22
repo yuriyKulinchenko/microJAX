@@ -25,7 +25,7 @@ namespace jax {
     X(NEG) X(TRANSPOSE) X(REDUCE_SUM)           \
     X(DOT_GENERAL) X(BROADCAST_IN_DIM)          \
     X(CONVERT_ELEMENT_TYPE) X(COND) X(SCAN)     \
-    X(EQ) X(NE) X(LT) X(LE) X(GT) X(GE)
+    X(SELECT) X(EQ) X(NE) X(LT) X(LE) X(GT) X(GE)
 
 #define TYPE_ENUM_LIST(X) \
     X(I32) X(I64) X(F32) X(F64) X(BOOL)
@@ -477,6 +477,21 @@ namespace jax {
         return std::invoke([&]<size_t... Is>(std::index_sequence<Is...>) -> output_tuple_t {
             return {(output_index.template operator()<Is>())...};
         }, std::make_index_sequence<num_outputs>());
+    }
+
+    template<size_t N>
+    array_t array_select(const array_t& pred, std::array<std::reference_wrapper<const array_t>, N> values) {
+        static_assert(N > 0);
+        // Depends on the shape of pred, values.
+        // For now, expect shape(pred) = shape(values)...
+        type_t type = values[0].get().get_type();
+        array_t output = array_t::build_fill(std::move(type), 0.);
+        for (size_t i = 0; i < output.get_value().size(); i++) {
+            const size_t index = pred.get_value()[i];
+            output.get_value()[i] = values[index].get().get_value()[i];
+        }
+
+        return output;
     }
 }
 

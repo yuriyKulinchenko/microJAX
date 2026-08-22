@@ -7,6 +7,21 @@
 
 using namespace jax;
 
+
+value array_value(const array_t& array, jaxpr_builder& builder) {
+    if (const std::optional<literal_t> literal = array.get_literal()) {
+        return value{*literal};
+    }
+
+
+    // Otherwise, add it to the array of consts:
+    builder.jaxpr.consts.push_back(array);
+    var_t fresh_var = builder.jaxpr.fresh_var(array.get_type());
+    builder.jaxpr.constvars.push_back(fresh_var);
+    return value{std::move(fresh_var)};
+}
+
+
 jaxpr_tracer elementwise_binary_op(
     const value& v1,
     const value& v2,

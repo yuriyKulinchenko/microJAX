@@ -96,6 +96,8 @@ public:
     jax::expression jaxpr;
 };
 
+jax::value array_value(const jax::array_t& array, jaxpr_builder& builder);
+
 template<std::convertible_to<jax::type_t>... Types, typename F>
 jax::expression get_jaxpr(F&& f, Types&&... types) {
     jaxpr_builder builder {};
@@ -124,6 +126,7 @@ auto jaxpr_tracer::switch_on(std::tuple<Fs...> branches, const Ts&... vals) cons
         if constexpr(std::convertible_to<T, jaxpr_tracer>) {
             return value{val.var};
         } else if constexpr(std::convertible_to<T, array_t>) {
+            // TODO: incorrect - array_value requires a builder argument; rewrite this.
             return array_value(val);
         }
         std::unreachable();
@@ -324,6 +327,34 @@ namespace jax {
         );
 
         return output_tracers;
+    }
+
+    template<typename Pred, typename... Values>
+    jaxpr_tracer tracer_select(jaxpr_builder& builder, const Pred& pred, const Values&... values) {
+        // Convert everything into an array of tracers:
+
+        auto to_value = [&builder]<typename T>(const T& x) -> value {
+            if constexpr(std::convertible_to<T, array_t>) {
+                return array_value(x, builder);
+            } else {
+                // jaxpr_tracer
+                return value{x.get_var()};
+            }
+        };
+
+        std::vector<value> processed_values = {to_value(values)...};
+        value tracer = to_value(pred);
+
+        // Get input variables, the single output variable:
+
+        var_t output = builder.jaxpr.fresh_var(processed_values[0].get_type());
+
+        builder.jaxpr.equations.emplace_back(
+            processed_values,
+            std::vector{output},
+            primitive_op::SELECT);
+
+        return jaxpr_tracer{builder, output};
     }
 }
 

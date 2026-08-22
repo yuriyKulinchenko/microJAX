@@ -12,10 +12,10 @@ inline jaxpr_tracer cos(const jaxpr_tracer& x) { return x.cos(); }
 inline jaxpr_tracer exp(const jaxpr_tracer& x) { return x.exp(); }
 inline jaxpr_tracer log(const jaxpr_tracer& x) { return x.log(); }
 
-inline jax::array_t sin(const jax::array_t& x) { return x.sin(); }
-inline jax::array_t cos(const jax::array_t& x) { return x.cos(); }
-inline jax::array_t exp(const jax::array_t& x) { return x.exp(); }
-inline jax::array_t log(const jax::array_t& x) { return x.log(); }
+inline array_t sin(const array_t& x) { return x.sin(); }
+inline array_t cos(const array_t& x) { return x.cos(); }
+inline array_t exp(const array_t& x) { return x.exp(); }
+inline array_t log(const array_t& x) { return x.log(); }
 
 namespace jax {
     template<typename T>
@@ -130,21 +130,6 @@ namespace jax {
         return populate_array(std::make_index_sequence<sizeof...(Ts)>());
     }
 
-    // TODO: move back to correct location
-
-    inline value array_value(const array_t& array, jaxpr_builder& builder) {
-        if (const std::optional<literal_t> literal = array.get_literal()) {
-            return value{*literal};
-        }
-
-
-        // Otherwise, add it to the array of consts:
-        builder.jaxpr.consts.push_back(array);
-        var_t fresh_var = builder.jaxpr.fresh_var(array.get_type());
-        builder.jaxpr.constvars.push_back(fresh_var);
-        return value{std::move(fresh_var)};
-    }
-
     template<typename F, typename... Consts, typename... Carry, typename... Xs>
     requires tracer_or_array_tuple<Consts...>
     && tracer_or_array_tuple<Carry...>
@@ -176,6 +161,26 @@ namespace jax {
             // Otherwise, convert to array
             return array_scan(std::move(f), tuple_to_array(std::move(consts)), tuple_to_array(std::move(carry)),
                 tuple_to_array(std::move(xs)), L, reverse);
+        }
+    }
+
+    template<typename Pred, typename... Ts>
+    auto select(const Pred& pred, const Ts&... values) {
+        // 'pred' and 'values' are instances of array_t or jaxpr_tracer
+        using values_find_tracer = tuple_find_type_instance<std::tuple<Ts...>, jaxpr_tracer>;
+
+        if constexpr(std::convertible_to<Pred, jaxpr_tracer>) {
+            // Tracer belongs to 'pred'
+            auto& builder = pred.get_builder();
+            return tracer_select(builder, pred, values...);
+        } else if constexpr(values_find_tracer::exists) {
+            // Tracer exists somewhere inside 'values'
+            constexpr size_t I = values_find_tracer::index;
+            auto& tracer = std::get<I>(std::forward_as_tuple(std::forward<Ts>(values)...));
+            auto& builder = tracer.get_builder();
+            return tracer_select(builder, pred, values...);
+        } else {
+            return array_select(pred, values...);
         }
     }
 }
