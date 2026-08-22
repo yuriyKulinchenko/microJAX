@@ -24,6 +24,8 @@ public:
 
         // TODO: Verify that size(input) == size(invars)
 
+        reset();
+
         for (const auto& [invar, input_array]: std::views::zip(jaxpr.invars, input)) {
             values[invar.get_id()] = std::make_unique<array_t>(input_array);
         }
@@ -127,6 +129,140 @@ public:
                     break;
                 }
 
+                case SCAN: {
+                    /*
+
+                     (c, Y) = scan(f)(k, c, X)
+                     (c, y) = scan(f)(k, c, x) <- takes slices
+
+                    */
+
+                    const auto& params = std::get<scan_params>(eq.get_params());
+                    const size_t input_count = eq.get_input().size();
+                    const size_t output_count = eq.get_output().size();
+
+                    const size_t num_xs = input_count - params.num_consts - params.num_carry;
+                    const size_t num_ys = output_count - params.num_carry;
+
+                    check_fixed_arity(eq, input_count, params.num_carry + num_xs);
+
+                    // Make sure 'f' accepts the right input types:
+
+                    // Iterate through (k, c)
+                    for (const auto& [var, val]: std::views::zip(params.jaxpr.invars, eq.get_input())
+                        | std::views::take(params.num_consts + params.num_carry)) {
+                        if (var.get_type() != val.get_type()) {
+                            throw formatted_error("Error: type mismatch for input parameters in SCAN");
+                        }
+                    }
+
+                    // Iterate through X
+                    for (const auto& [var, val]: std::views::zip(params.jaxpr.invars, eq.get_input())
+                        | std::views::drop(params.num_consts + params.num_carry)) {
+                        // Have to compare slice type:
+                        if (var.get_dtype() != val.get_dtype()) {
+                            throw formatted_error("Error: dtype mismatch for input paramaters in SCAN");
+                        }
+
+                        if (!std::ranges::equal(var.get_shape(), val.get_shape() | std::views::drop(1))) {
+                            throw formatted_error("Error: shape mismatch for input parameters in SCAN");
+                        }
+                    }
+
+
+                    // Iterate through c
+                    for (const auto& [val, var]: std::views::zip(params.jaxpr.outvals, eq.get_output())
+                        | std::views::take(params.num_carry)) {
+                        if (var.get_type() != val.get_type()) {
+                            throw formatted_error("Error: type mismatch for output parameters in SCAN");
+                        }
+                    }
+
+                    // Iterate through y
+                    for (const auto& [val, var]: std::views::zip(params.jaxpr.outvals, eq.get_output())
+                        | std::views::drop(params.num_carry)) {
+                        // Have to compare slice type:
+                        if (var.get_dtype() != val.get_dtype()) {
+                            throw formatted_error("Error: dtype mismatch for output parameters in SCAN");
+                        }
+
+                        if (!std::ranges::equal(val.get_shape(), var.get_shape() | std::views::drop(1))) {
+                            throw formatted_error("Error: shape mismatch for output parameters in SCAN");
+                        }
+                    }
+
+                    std::vector<array_t> Y {};
+                    Y.reserve(num_ys);
+
+                    for (const auto& var: eq.get_output() | std::views::drop(params.num_carry)) {
+                        Y.push_back(array_t::build_fill(var.get_type(), 0.));
+                    }
+
+                    auto get_const = [&](const size_t const_index) -> array_t {
+                        return get_input(eq, const_index);
+                    };
+
+                    auto get_carry = [&](const size_t carry_index) -> array_t {
+                        return get_input(eq, params.num_consts + carry_index);
+                    };
+
+                    auto get_xs_slice = [&](const size_t x_index, const size_t slice_index) -> array_t {
+                        return get_input(eq, params.num_consts + params.num_carry + x_index).slice({slice_index});
+                    };
+
+                    auto update_carry = [&](std::vector<array_t>& inputs, const std::span<array_t> carries) -> void {
+                        for (size_t i = 0; i < carries.size(); i++) {
+                            inputs[params.num_consts + i] = carries[i];
+                        }
+                    };
+
+                    // Simultaneous update of multiple ys, across multiple slices:
+                    auto update_ys = [&](const size_t slice_index, std::span<array_t> ys_slices) -> void {
+                        for (size_t i = 0; i < ys_slices.size(); i++) {
+                            Y[i].add_slice({slice_index}, ys_slices[i]);
+                        }
+                    };
+
+                    auto update_xs_slice = [&](std::vector<array_t>& inputs, const size_t slice_index) -> void {
+                        for (size_t i = 0; i < num_xs; i++) {
+                            inputs[params.num_consts + params.num_carry + i] = get_xs_slice(i, slice_index);
+                        }
+                    };
+
+                    std::vector<array_t> inputs {}; // The constants persist.
+                    inputs.reserve(input_count);
+
+                    for (size_t i = 0; i < params.num_consts; i++) inputs.push_back(get_const(i));
+                    for (size_t i = 0; i < params.num_carry; i++) inputs.push_back(get_carry(i));
+                    for (size_t i = 0; i < num_xs; i++) inputs.push_back(get_xs_slice(i, 0));
+
+                    // TODO: for now, reverse is not supported. Should be fairly trivial to implement.
+
+                    jax_vm vm(params.jaxpr);
+
+                    for (size_t i = 0; i < params.length; i++) {
+                        std::vector<array_t> outputs = vm.run(inputs);
+                        update_carry(inputs, std::span{outputs.begin(), outputs.begin() + params.num_carry});
+                        update_ys(i, std::span{outputs.begin() + params.num_carry, outputs.end()});
+                        if (i < params.length - 1) update_xs_slice(inputs, i + 1);
+                    }
+
+                    // Gather carries first:
+                    for (const auto& [var, array]:
+                    std::views::zip(eq.get_output() | std::views::take(params.num_carry),
+                            inputs | std::views::drop(params.num_consts) | std::views::take(params.num_carry))) {
+                        emplace_variable(var, array);
+                    }
+
+                    // Gather ys next:
+                    for (const auto& [var, array]:
+                        std::views::zip(eq.get_output() | std::views::drop(params.num_carry), Y)) {
+                        emplace_variable(var, array);
+                    }
+
+                    break;
+                }
+
                 default: {
                     throw std::logic_error("Error: not implemented");
                 }
@@ -141,9 +277,13 @@ public:
         }) | std::ranges::to<std::vector<array_t>>();
     }
 
+    void reset() {
+        for (auto& v: values) v.reset();
+    }
+
 private:
 
-    const array_t& fetch_value(const var_t& var) {
+    const array_t& fetch_value(const var_t& var) const {
         if (values[var.get_id()] == nullptr) {
             throw formatted_error("Error: variable %{} does not exist", var.get_id());
         }
@@ -181,7 +321,7 @@ private:
         }
     }
 
-    void check_fixed_arity(const equation& eq, size_t input_arity, size_t output_arity=1) {
+    static void check_fixed_arity(const equation& eq, size_t input_arity, size_t output_arity=1) {
         if (eq.get_input().size() != input_arity) {
             throw formatted_error("Error: input arity of equation is {}, expected {}",
                 eq.get_input().size(), input_arity);

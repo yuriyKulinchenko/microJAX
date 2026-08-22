@@ -22,7 +22,7 @@ void switch_example();
 void scan_example();
 
 int main() {
-    switch_example();
+    scan_example();
     return 0;
 }
 

@@ -202,7 +202,9 @@ namespace jax {
 
         void set_type(type_t new_type);
 
-        [[nodiscard]] array_t slice(const std::vector<size_t>& indices);
+        [[nodiscard]] array_t slice(const std::vector<size_t>& indices) const;
+        void add_slice(const std::vector<size_t>& indices, const array_t& slice);
+
         [[nodiscard]] bool has_single_value(f64 val) const;
         [[nodiscard]] bool has_single_value() const;
         void compute_strides();

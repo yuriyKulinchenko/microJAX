@@ -427,9 +427,9 @@ namespace jax {
     BINARY_COMPARE_OP(>=);
 
     // TODO: expose this globally somehow
-    double epsilon = 1. / static_cast<double>(1 << 10);
+    static double epsilon = 1. / static_cast<double>(1 << 10);
 
-    bool double_eq(double x, double y) {
+    static bool double_eq(double x, double y) {
         return std::abs(x - y) < epsilon;
     }
 
@@ -554,7 +554,7 @@ namespace jax {
         return value[flatten_index(stride, indices)];
     }
 
-    array_t array_t::slice(const std::vector<size_t>& indices) {
+    array_t array_t::slice(const std::vector<size_t>& indices) const {
         if (indices.empty()) return *this;
 
         if (indices.size() > type.get_shape().size()) {
@@ -573,6 +573,17 @@ namespace jax {
         std::vector<double> new_value {value.begin() + start_index, value.begin() + start_index + new_size};
 
         return array_t{type_t{type.get_dtype(), std::move(new_shape)}, std::move(new_value)};
+    }
+
+    // Precondition is that 'slice' and 'indices' are both valid.
+    void array_t::add_slice(const std::vector<size_t>& indices, const array_t& slice) {
+        size_t start_index = 0;
+        for (size_t i = 0; i < indices.size(); i++) {
+            start_index += stride[i] * indices[i];
+        }
+        for (size_t i = 0; i < slice.value.size(); i++) {
+            value[start_index + i] += slice.value[i];
+        }
     }
 
     bool array_t::has_single_value(f64 val) const {
