@@ -12,10 +12,10 @@ inline jaxpr_tracer cos(const jaxpr_tracer& x) { return x.cos(); }
 inline jaxpr_tracer exp(const jaxpr_tracer& x) { return x.exp(); }
 inline jaxpr_tracer log(const jaxpr_tracer& x) { return x.log(); }
 
-inline array_t sin(const array_t& x) { return x.sin(); }
-inline array_t cos(const array_t& x) { return x.cos(); }
-inline array_t exp(const array_t& x) { return x.exp(); }
-inline array_t log(const array_t& x) { return x.log(); }
+inline jax::array_t sin(const jax::array_t& x) { return x.sin(); }
+inline jax::array_t cos(const jax::array_t& x) { return x.cos(); }
+inline jax::array_t exp(const jax::array_t& x) { return x.exp(); }
+inline jax::array_t log(const jax::array_t& x) { return x.log(); }
 
 namespace jax {
     template<typename T>
