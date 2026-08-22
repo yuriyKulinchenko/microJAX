@@ -23,7 +23,7 @@ public:
         return var;
     }
 
-    [[nodiscard]] jaxpr_builder& get_builder() {
+    [[nodiscard]] jaxpr_builder& get_builder() const {
         return builder;
     }
 
@@ -343,14 +343,21 @@ namespace jax {
         };
 
         std::vector<value> processed_values = {to_value(values)...};
-        value tracer = to_value(pred);
+
+        // The predicate is the switching operand: like COND, it is an integer
+        // index. A boolean predicate is auto-converted to I32.
+        value predicate = promote(to_value(pred), dtype_t::I32, builder);
+
+        std::vector<value> inputs {predicate};
+        inputs.reserve(processed_values.size() + 1);
+        inputs.append_range(processed_values);
 
         // Get input variables, the single output variable:
 
         var_t output = builder.jaxpr.fresh_var(processed_values[0].get_type());
 
         builder.jaxpr.equations.emplace_back(
-            processed_values,
+            std::move(inputs),
             std::vector{output},
             primitive_op::SELECT);
 

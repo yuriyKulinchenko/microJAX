@@ -201,11 +201,11 @@ bool grad_class::should_propagate(const std::vector<value>& input_vals,
         return false;
     }
 
-    // Check if any of the input values (excluding the index) are variables:
+    // Check if any of the input values are differentiable variables:
 
     bool input_var_exists = false;
-    for (auto& input_val: input_vals | std::views::drop(1)) {
-        if (input_val.is<var_t>()) {
+    for (auto& input_val: input_vals) {
+        if (input_val.is<var_t>() && !is_integral(input_val.get_dtype())) {
             input_var_exists = true;
             break;
         }
@@ -1007,6 +1007,53 @@ void grad_class::propagate_adjoints(equation& eq) {
             for (size_t i = 0; i < input_vals.size(); i++) {
                 if (!input_vals[i].is<var_t>()) continue;
                 update_adjoint(input_vals[i].get_var(), value{updates[i]});
+            }
+
+            break;
+        }
+
+        case SELECT: {
+            // y = select(b, x1, x2)
+            // => x1' += select(b, y', 0), x2' += select(b, 0, y')
+
+            auto& input_vals = eq.get_input();
+            auto& output_vars = eq.get_output();
+
+            if (!should_propagate(input_vals, output_vars)) break;
+
+            // Snapshot the inputs before emplacing: broadcasted_value and the
+            // update loop below emplace into output_expr.equations, so no
+            // reference into that vector may be held across them.
+            std::vector<value> inputs {input_vals};
+
+            auto& output_adj = *get_adjoint(output_vars[0]); // Guaranteed not null
+            value zero_tensor = broadcasted_value(output_adj.get_type(), 0.);
+
+            for (size_t i = 1; i < inputs.size(); i++) {
+
+                if (!inputs[i].is<var_t>()) {
+                    continue;
+                }
+
+                const var_t& input_var = inputs[i].get_var();
+
+                std::vector input {inputs[0]}; // {b}
+                input.reserve(inputs.size());
+                for (size_t j = 0; j < inputs.size() - 1; j++) {
+                    input.push_back(zero_tensor); // {b, 0, ..., 0}
+                }
+
+                input[i] = output_adj; // {b, 0, ..., y', ..., 0}
+
+                var_t input_adj_update = fresh_var(output_adj.get_type());
+
+                output_expr.equations.emplace_back(
+                    std::move(input),
+                    std::vector{input_adj_update},
+                    SELECT
+                );
+
+                update_adjoint(input_var, value{input_adj_update});
             }
 
             break;

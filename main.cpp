@@ -20,10 +20,33 @@ T softmax(T vec) {
 
 void switch_example();
 void scan_example();
+void select_example();
 
 int main() {
-    scan_example();
+    select_example();
     return 0;
+}
+
+void select_example() {
+    using namespace jax;
+    using enum dtype_t;
+
+    jaxpr_builder builder {};
+
+    // Passing a bool as the switching operand: it should be recognised and
+    // converted to the integer switching type (I32), like COND.
+    auto pred = builder.register_tracer(BOOL, 2, 2);
+    auto x = builder.register_tracer(F32, 2, 2);
+    auto y = builder.register_tracer(F32, 2, 2);
+
+    auto z = select(pred, x, y);
+    builder.register_output(reduce_sum(z, {0, 1}));
+
+    auto jaxpr = builder.get_jaxpr();
+    std::cout << "Original expression:\n" << jaxpr;
+
+    auto grad_jaxpr = grad(jaxpr);
+    std::cout << "Grad expression:\n" << grad_jaxpr;
 }
 
 void scan_example() {
