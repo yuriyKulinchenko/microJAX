@@ -935,19 +935,27 @@ void grad_class::propagate_adjoints(equation& eq) {
 
             scan_carry_transform(eq);
 
+            // Snapshot eq's operands and scan params before emitting equations
+            // below: those calls emplace into output_expr.equations, which would
+            // invalidate references into eq.
+            std::vector eq_inputs {eq.get_input()};
+            std::vector eq_outputs {eq.get_output()};
+            size_t length = params.length;
+            bool reverse = params.reverse;
+
             std::vector<value> inputs{};
 
             // Pass k:
             offset = 0;
             for (size_t i = 0; i < num_consts; i++) {
-                auto& k_val = eq.get_input(offset + i);
+                auto& k_val = eq_inputs[offset + i];
                 inputs.push_back(k_val);
             }
 
             // Pass initial value of k'_acc (0):
             offset = 0;
             for (size_t i = 0; i < num_consts; i++) {
-                auto& k_val = eq.get_input(offset + i);
+                auto& k_val = eq_inputs[offset + i];
                 inputs.push_back(broadcasted_value(k_val.get_type(), 0));
             }
 
@@ -955,35 +963,35 @@ void grad_class::propagate_adjoints(equation& eq) {
             // Pass c':
             offset = 0;
             for (size_t i = 0; i < num_carry; i++) {
-                auto& c_var = eq.get_output(offset + i);
+                auto& c_var = eq_outputs[offset + i];
                 inputs.push_back(get_adjoint_value(c_var));
             }
 
             // Pass C:
             offset = num_carry + num_ys;
             for (size_t i = 0; i < num_carry; i++) {
-                auto& C = eq.get_output(offset + i);
+                auto& C = eq_outputs[offset + i];
                 inputs.push_back(value{C});
             }
 
             // Pass X:
             offset = num_consts + num_carry;
             for (size_t i = 0; i < num_xs; i++) {
-                auto& X = eq.get_input(offset + i);
+                auto& X = eq_inputs[offset + i];
                 inputs.push_back(X);
             }
 
             // Pass Y':
             offset = num_carry;
             for (size_t i = 0; i < num_ys; i++) {
-                auto& y_var = eq.get_output(offset + i);
+                auto& y_var = eq_outputs[offset + i];
                 inputs.push_back(get_adjoint_value(y_var));
             }
 
             // The output will be updates to (k', c_0', X'):
 
             std::vector<var_t> outputs {};
-            for (auto& inval: eq.get_input()) {
+            for (auto& inval: eq_inputs) {
                 outputs.push_back(fresh_var(inval.get_type()));
             }
 
@@ -993,10 +1001,10 @@ void grad_class::propagate_adjoints(equation& eq) {
                 SCAN,
                 scan_params{
                     .jaxpr = f_prime,
-                    .length = params.length,
-                    .num_consts = params.num_consts,
-                    .num_carry = params.num_consts + params.num_carry,
-                    .reverse = !params.reverse
+                    .length = length,
+                    .num_consts = num_consts,
+                    .num_carry = num_consts + num_carry,
+                    .reverse = !reverse
                 }
             );
 
@@ -1004,9 +1012,9 @@ void grad_class::propagate_adjoints(equation& eq) {
 
             // Update adjoints:
 
-            for (size_t i = 0; i < input_vals.size(); i++) {
-                if (!input_vals[i].is<var_t>()) continue;
-                update_adjoint(input_vals[i].get_var(), value{updates[i]});
+            for (size_t i = 0; i < eq_inputs.size(); i++) {
+                if (!eq_inputs[i].is<var_t>()) continue;
+                update_adjoint(eq_inputs[i].get_var(), value{updates[i]});
             }
 
             break;
