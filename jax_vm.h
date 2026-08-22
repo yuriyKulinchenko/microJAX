@@ -229,22 +229,25 @@ public:
                         }
                     };
 
+                    // Maps a step number to the slice it touches:
+                    auto slice_at = [&](size_t s) {
+                        return params.reverse ? params.length - 1 - s : s;
+                    };
+
                     std::vector<array_t> inputs {}; // The constants persist.
                     inputs.reserve(input_count);
 
                     for (size_t i = 0; i < params.num_consts; i++) inputs.push_back(get_const(i));
                     for (size_t i = 0; i < params.num_carry; i++) inputs.push_back(get_carry(i));
-                    for (size_t i = 0; i < num_xs; i++) inputs.push_back(get_xs_slice(i, 0));
-
-                    // TODO: for now, reverse is not supported. Should be fairly trivial to implement.
+                    for (size_t i = 0; i < num_xs; i++) inputs.push_back(get_xs_slice(i, slice_at(0)));
 
                     jax_vm vm(params.jaxpr);
 
-                    for (size_t i = 0; i < params.length; i++) {
+                    for (size_t s = 0; s < params.length; s++) {
                         std::vector<array_t> outputs = vm.run(inputs);
                         update_carry(inputs, std::span{outputs.begin(), outputs.begin() + params.num_carry});
-                        update_ys(i, std::span{outputs.begin() + params.num_carry, outputs.end()});
-                        if (i < params.length - 1) update_xs_slice(inputs, i + 1);
+                        update_ys(slice_at(s), std::span{outputs.begin() + params.num_carry, outputs.end()});
+                        if (s + 1 < params.length) update_xs_slice(inputs, slice_at(s + 1));
                     }
 
                     // Gather carries first:
