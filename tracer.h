@@ -8,6 +8,7 @@
 
 class jaxpr_tracer;
 class jaxpr_builder;
+class jaxpr_tracer_index;
 
 class jaxpr_tracer {
 public:
@@ -61,6 +62,9 @@ public:
         std::vector<size_t> left_batch,
         std::vector<size_t> right_batch) const;
 
+    [[nodiscard]] jaxpr_tracer_index at(jaxpr_tracer idx) const;
+    [[nodiscard]] jaxpr_tracer_index at(jax::array_t idx) const;
+
     template<typename... Fs, typename... Ts>
     [[nodiscard]] auto switch_on(std::tuple<Fs...> branches, const Ts&... vals) const;
 
@@ -94,6 +98,33 @@ public:
 
     [[nodiscard]] jax::expression&& get_jaxpr();
     jax::expression jaxpr;
+};
+
+/*
+
+The class jaxpr_tracer_index is a proxy object required when performing scatter-reduce like operations:
+scatter_add, scatter_mul, etc.
+
+For a tracer 't' of type jaxpr_tracer, t.at(idx).op(u) produces a jaxpr_tracer_index
+on the invocation of the 'at(idx)' method, and a jaxpr_tracer on the invocation of the 'op(u)'
+method. jaxpr_tracer_index holds a reference to the underlying tensor object,
+
+*/
+
+class jaxpr_tracer_index {
+public:
+    jaxpr_tracer_index(const jaxpr_tracer& x, jaxpr_tracer idx);
+    jaxpr_tracer_index(const jaxpr_tracer& x, jax::array_t idx);
+
+    jaxpr_tracer add(jaxpr_tracer update);
+    jaxpr_tracer add(jax::array_t update);
+
+    jaxpr_tracer mul(jaxpr_tracer update);
+    jaxpr_tracer mul(jax::array_t update);
+
+private:
+    const jaxpr_tracer& x;
+    std::variant<jaxpr_tracer, jax::array_t> idx;
 };
 
 jax::value array_value(const jax::array_t& array, jaxpr_builder& builder);

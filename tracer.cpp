@@ -454,6 +454,21 @@ jaxpr_tracer jaxpr_tracer::dot_general(
     return {builder, std::move(new_var)};
 }
 
+jaxpr_tracer_index jaxpr_tracer::at(jaxpr_tracer idx) const {
+    return jaxpr_tracer_index{*this, std::move(idx)};
+}
+
+jaxpr_tracer_index jaxpr_tracer::at(array_t idx) const {
+    return jaxpr_tracer_index{*this, std::move(idx)};
+}
+
+jaxpr_tracer_index::jaxpr_tracer_index(const jaxpr_tracer& x, jaxpr_tracer idx):
+x{x}, idx{std::move(idx)} {}
+
+jaxpr_tracer_index::jaxpr_tracer_index(const jaxpr_tracer& x, array_t idx):
+x{x}, idx{std::move(idx)} {}
+
+
 jaxpr_tracer jaxpr_builder::register_tracer(type_t type) {
     auto var = var_t{jaxpr.new_var_id(), std::move(type)};
     jaxpr.invars.push_back(var);

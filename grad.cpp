@@ -25,8 +25,6 @@ The core loop of backpropogation will essentially involve iterating through the 
 expression in reverse, handling each equation individually. Each equation will be handled
 by updating all necessary adjoints.
 
-The current implementation of grad will not be handling nested expressions, however it is
-amenable to this extension.
 */
 
 using namespace jax;
