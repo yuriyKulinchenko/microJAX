@@ -117,24 +117,24 @@ public:
     jaxpr_tracer get();
 
     // Overwrite:
-    jaxpr_tracer set(jaxpr_tracer update);
-    jaxpr_tracer set(jax::array_t update);
+    jaxpr_tracer set(const jaxpr_tracer& update);
+    jaxpr_tracer set(const jax::array_t& update);
 
-    jaxpr_tracer add(jaxpr_tracer update);
-    jaxpr_tracer add(jax::array_t update);
+    jaxpr_tracer add(const jaxpr_tracer& update);
+    jaxpr_tracer add(const jax::array_t& update);
 
-    jaxpr_tracer multiply(jaxpr_tracer update);
-    jaxpr_tracer multiply(jax::array_t update);
+    jaxpr_tracer multiply(const jaxpr_tracer& update);
+    jaxpr_tracer multiply(const jax::array_t& update);
 
-    jaxpr_tracer max(jaxpr_tracer update);
-    jaxpr_tracer max(jax::array_t update);
+    jaxpr_tracer max(const jaxpr_tracer& update);
+    jaxpr_tracer max(const jax::array_t& update);
 
-    jaxpr_tracer min(jaxpr_tracer update);
-    jaxpr_tracer min(jax::array_t update);
-
+    jaxpr_tracer min(const jaxpr_tracer& update);
+    jaxpr_tracer min(const jax::array_t& update);
 private:
 
     jax::value get_idx_value();
+    jaxpr_tracer op(jax::value update, jax::primitive_op scatter_op);
 
     jaxpr_tracer& x;
     std::variant<jaxpr_tracer, jax::array_t> idx;
