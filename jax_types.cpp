@@ -178,6 +178,10 @@ namespace jax {
         return array_t{std::move(type), std::vector(count, value)};
     }
 
+    array_t array_t::zeros(std::vector<size_t> shape, dtype_t dtype) {
+        return build_fill(type_t{dtype, std::move(shape)}, 0.);
+    }
+
     void array_t::compute_strides() {
         const std::vector<size_t>& shape = type.get_shape();
         stride.resize(shape.size());

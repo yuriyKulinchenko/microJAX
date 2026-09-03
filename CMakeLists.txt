@@ -28,7 +28,8 @@ add_executable(microJAX main.cpp
         DCE_class.h
         jax_format.h
         jax_vm.h
-        jax_vm.cpp)
+        jax_vm.cpp
+)
 
 add_executable(microJAX_tests gtest_test.cpp
         jax_types.cpp

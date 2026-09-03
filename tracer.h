@@ -6,9 +6,7 @@
 
 #include "jax_types.h"
 
-class jaxpr_tracer;
 class jaxpr_builder;
-class jaxpr_tracer_index;
 
 class jaxpr_tracer {
 public:
@@ -116,11 +114,23 @@ public:
     jaxpr_tracer_index(const jaxpr_tracer& x, jaxpr_tracer idx);
     jaxpr_tracer_index(const jaxpr_tracer& x, jax::array_t idx);
 
+    jaxpr_tracer get();
+
+    // Overwrite:
+    jaxpr_tracer set(jaxpr_tracer update);
+    jaxpr_tracer set(jax::array_t update);
+
     jaxpr_tracer add(jaxpr_tracer update);
     jaxpr_tracer add(jax::array_t update);
 
-    jaxpr_tracer mul(jaxpr_tracer update);
-    jaxpr_tracer mul(jax::array_t update);
+    jaxpr_tracer multiply(jaxpr_tracer update);
+    jaxpr_tracer multiply(jax::array_t update);
+
+    jaxpr_tracer max(jaxpr_tracer update);
+    jaxpr_tracer max(jax::array_t update);
+
+    jaxpr_tracer min(jaxpr_tracer update);
+    jaxpr_tracer min(jax::array_t update);
 
 private:
     const jaxpr_tracer& x;

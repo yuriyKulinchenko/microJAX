@@ -34,6 +34,9 @@ SLICE
 PAD
 */
 
+class jaxpr_tracer;
+class jaxpr_tracer_index;
+
 namespace jax {
 
 #define PRIMITIVE_OP_LIST(X)                        \
@@ -150,6 +153,9 @@ namespace jax {
         inline static std::vector<size_t> shape = {};
     };
 
+
+    class array_index;
+
     class array_t {
     public:
         friend class array_span_t;
@@ -161,6 +167,7 @@ namespace jax {
             const std::function<double(const std::vector<size_t>&)>& f);
 
         static array_t build_fill(type_t type, double value);
+        static array_t zeros(std::vector<size_t> shape, dtype_t dtype = dtype_t::F32);
 
         // ReSharper disable once CppNonExplicitConvertingConstructor
         array_t(double value);
@@ -224,6 +231,9 @@ namespace jax {
         [[nodiscard]] std::vector<double>& get_value();
         [[nodiscard]] std::optional<literal_t> get_literal() const;
 
+        [[nodiscard]] jaxpr_tracer_index at(jaxpr_tracer idx) const;
+        [[nodiscard]] array_index at(array_t idx) const;
+
         void set_type(type_t new_type);
 
         [[nodiscard]] array_t index(const std::vector<size_t>& indices) const;
@@ -241,6 +251,33 @@ namespace jax {
         std::vector<size_t> stride;
         f64 single_value = 0;
         bool has_single_value_ = false;
+    };
+
+    class array_index {
+    public:
+    array_index(const array_t& x, array_t other);
+
+    array_t get();
+
+    // Overwrite:
+    jaxpr_tracer set(jaxpr_tracer update);
+    array_t set(array_t update);
+
+    jaxpr_tracer add(jaxpr_tracer update);
+    array_t add(array_t update);
+
+    jaxpr_tracer multiply(jaxpr_tracer update);
+    array_t multiply(array_t update);
+
+    jaxpr_tracer max(jaxpr_tracer update);
+    array_t max(array_t update);
+
+    jaxpr_tracer min(jaxpr_tracer update);
+    array_t min(array_t update);
+
+    private:
+        const array_t& x;
+        array_t idx;
     };
 
     struct type_span {
