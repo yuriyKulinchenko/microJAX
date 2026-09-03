@@ -39,6 +39,11 @@ namespace jax {
     }
 
     template<typename T>
+    T reshape(T x, std::vector<size_t> shape) {
+        return x.reshape(std::move(shape));
+    }
+
+    template<typename T>
     T dot_general(T x, T y,
         std::vector<size_t> left_contract, std::vector<size_t> right_contract,
         std::vector<size_t> left_batch, std::vector<size_t> right_batch) {

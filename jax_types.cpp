@@ -3,12 +3,6 @@
 
 namespace jax {
 
-    size_t num_elements(std::span<const size_t> shape) {
-        size_t total = 1;
-        for (size_t dim : shape) total *= dim;
-        return total;
-    }
-
     std::vector<size_t> new_get_shape(const std::vector<size_t>& x_shape, const std::vector<size_t>& idx_shape) {
         // If x: [n, ms...], idx: [ls...], then .get(): [ls..., ms...]
         std::vector<size_t> new_shape {};
@@ -392,6 +386,11 @@ namespace jax {
     array_t array_t::reduce_min(const std::vector<size_t>& axes) const {
         return reduce_monoid<std::numeric_limits<double>::max(),
         [](double x, double y) {return std::min(x, y);}>(axes);
+    }
+
+    array_t array_t::reshape(std::vector<size_t> shape) const {
+        std::vector<size_t> new_sizes = deduced_shape(shape, num_elements(type.get_shape()));
+        return array_t {type_t{type.get_dtype(), std::move(new_sizes)}, value};
     }
 
     array_t array_t::transpose(const std::vector<size_t>& permutation) const {

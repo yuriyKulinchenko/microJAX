@@ -50,6 +50,8 @@ public:
     [[nodiscard]] jaxpr_tracer reduce_max(std::vector<size_t> axes) const;
     [[nodiscard]] jaxpr_tracer reduce_min(std::vector<size_t> axes) const;
 
+    [[nodiscard]] jaxpr_tracer reshape(std::vector<size_t> shape) const;
+
     [[nodiscard]] jaxpr_tracer convert_element_type(jax::dtype_t dtype) const;
 
     [[nodiscard]] jaxpr_tracer broadcast_in_dim(

@@ -305,6 +305,24 @@ jaxpr_tracer jaxpr_tracer::reduce_min(std::vector<size_t> axes) const {
     return reduce_monoid<reduce_min_params>(std::move(axes), primitive_op::REDUCE_MIN);
 }
 
+jaxpr_tracer jaxpr_tracer::reshape(std::vector<size_t> shape) const {
+
+
+    std::vector<size_t> new_sizes = deduced_shape(shape, num_elements(var.get_shape()));
+    var_t reshaped_var = builder.jaxpr.fresh_var(type_t{var.get_dtype(), new_sizes});
+
+    builder.jaxpr.equations.emplace_back(
+        std::vector{value{var}},
+        std::vector{reshaped_var},
+        primitive_op::RESHAPE,
+        reshape_params {
+            .new_sizes = std::move(new_sizes)
+        }
+    );
+
+    return jaxpr_tracer{builder, std::move(reshaped_var)};
+}
+
 jaxpr_tracer jaxpr_tracer::convert_element_type(dtype_t dtype) const {
     type_t new_type {dtype, var.get_type().get_shape()};
 

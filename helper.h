@@ -308,6 +308,46 @@ std::array<first_type<nullptr_t, Ts...>, sizeof...(Ts)> tuple_to_array(std::tupl
     return populate_array(std::make_index_sequence<sizeof...(Ts)>());
 }
 
+inline size_t num_elements(std::span<const size_t> shape) {
+    size_t total = 1;
+    for (size_t dim : shape) total *= dim;
+    return total;
+}
+
+inline std::vector<size_t> deduced_shape(std::span<const size_t> shape, size_t total_size) {
+    size_t current_size = 1;
+    std::vector new_shape (shape.begin(), shape.end());
+
+    bool seen_inferred_axis = false;
+    size_t inferred_axis_index = 0;
+
+    for (size_t i = 0; i < shape.size(); i++) {
+        if (shape[i] == -1) {
+            if (seen_inferred_axis) {
+                throw std::logic_error("Error: only one inferred axis can exist during shape deduction");
+            }
+
+            seen_inferred_axis = true;
+            inferred_axis_index = i;
+        } else {
+            current_size *= shape[i];
+        }
+    }
+
+    if (seen_inferred_axis) {
+        if (current_size > total_size || total_size % current_size != 0) {
+            throw std::logic_error("Error: deduced shape has impossible dimensions");
+        }
+        new_shape[inferred_axis_index] = total_size / current_size;
+    } else {
+        if (current_size != total_size) {
+            throw std::logic_error("Error: deduced shape has impossible dimensions");
+        }
+    }
+
+    return new_shape;
+}
+
 
 
 #endif //HELPER_H

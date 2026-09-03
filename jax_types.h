@@ -22,7 +22,7 @@ TODO:
 REDUCE_MAX, REDUCE_MIN // Done
 GATHER // Done
 SCATTER_ADD, SCATTER_MUL, SCATTER_MAX, SCATTER // Done
-RESHAPE
+RESHAPE // Done
 SQRT, RSQRT
 TANH
 LOGISTIC
@@ -221,6 +221,8 @@ namespace jax {
         [[nodiscard]] array_t reduce_sum(const std::vector<size_t>& axes) const;
         [[nodiscard]] array_t reduce_max(const std::vector<size_t>& axes) const;
         [[nodiscard]] array_t reduce_min(const std::vector<size_t>& axes) const;
+
+        [[nodiscard]] array_t reshape(std::vector<size_t> shape) const;
 
         [[nodiscard]] array_t convert_element_type(dtype_t dtype) const;
 
