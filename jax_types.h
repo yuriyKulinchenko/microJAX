@@ -155,6 +155,7 @@ namespace jax {
 
 
     class array_index;
+    class array_tracer_index;
 
     class array_t {
     public:
@@ -231,7 +232,7 @@ namespace jax {
         [[nodiscard]] std::vector<double>& get_value();
         [[nodiscard]] std::optional<literal_t> get_literal() const;
 
-        [[nodiscard]] jaxpr_tracer_index at(jaxpr_tracer idx) const;
+        [[nodiscard]] array_tracer_index at(jaxpr_tracer idx) const;
         [[nodiscard]] array_index at(array_t idx) const;
 
         void set_type(type_t new_type);
@@ -255,28 +256,27 @@ namespace jax {
 
     class array_index {
     public:
-    array_index(const array_t& x, array_t other);
+        array_index(array_t& x, array_t idx);
 
-    array_t get();
+        array_t get();
 
-    // Overwrite:
-    jaxpr_tracer set(jaxpr_tracer update);
-    array_t set(array_t update);
+        jaxpr_tracer set(const jaxpr_tracer& update);
+        array_t set(const array_t& update);
 
-    jaxpr_tracer add(jaxpr_tracer update);
-    array_t add(array_t update);
+        jaxpr_tracer add(const jaxpr_tracer& update);
+        array_t add(const array_t& update);
 
-    jaxpr_tracer multiply(jaxpr_tracer update);
-    array_t multiply(array_t update);
+        jaxpr_tracer multiply(const jaxpr_tracer& update);
+        array_t multiply(const array_t& update);
 
-    jaxpr_tracer max(jaxpr_tracer update);
-    array_t max(array_t update);
+        jaxpr_tracer max(const jaxpr_tracer& update);
+        array_t max(const array_t& update);
 
-    jaxpr_tracer min(jaxpr_tracer update);
-    array_t min(array_t update);
+        jaxpr_tracer min(const jaxpr_tracer& update);
+        array_t min(const array_t& update);
 
     private:
-        const array_t& x;
+        array_t& x;
         array_t idx;
     };
 

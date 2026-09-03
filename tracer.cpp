@@ -468,43 +468,22 @@ x{x}, idx{std::move(idx)} {}
 jaxpr_tracer_index::jaxpr_tracer_index(jaxpr_tracer& x, array_t idx):
 x{x}, idx{std::move(idx)} {}
 
-jaxpr_tracer jaxpr_tracer_index::get() {
-    value idx_val = get_idx_value();
-
+static std::vector<size_t> new_get_shape(const std::vector<size_t>& x_shape, const std::vector<size_t>& idx_shape) {
     // If x: [n, ms...], idx: [ls...], then .get(): [ls..., ms...]
-
-    auto& x_shape = x.get_type().get_shape();
-
     std::vector<size_t> new_shape {};
-    new_shape.reserve(x_shape.size() - 1 + idx_val.get_shape().size());
+    new_shape.reserve(x_shape.size() - 1 + idx_shape.size());
 
-    for (auto dim: idx_val.get_shape()) new_shape.push_back(dim);
+    for (auto dim: idx_shape) new_shape.push_back(dim);
     for (auto dim: x_shape | std::views::drop(1)) new_shape.push_back(dim);
 
-    auto& jaxpr = x.get_builder().jaxpr;
-
-    type_t new_type {x.get_type().get_dtype(), std::move(new_shape)};
-    var_t new_var = jaxpr.fresh_var(std::move(new_type));
-
-    jaxpr.equations.emplace_back(
-        std::vector{value{x.get_var()}, std::move(idx_val)},
-        std::vector{new_var},
-        primitive_op::GATHER
-    );
-
-    return jaxpr_tracer{x.get_builder(), new_var};
+    return new_shape;
 }
 
-// Most general case:
-jaxpr_tracer jaxpr_tracer_index::op(value update, primitive_op scatter_op) {
-    using namespace std::views;
-    value idx_val = get_idx_value();
-
+static void validate_scatter_op_shapes(const std::vector<size_t>& x_shape,
+                                       const std::vector<size_t>& idx_shape, const std::vector<size_t>& update_shape) {
     // If x: [n, ms...], idx: [ls...], update: [ls..., ms...], then .op(): [n, ms...]
 
-    auto& x_shape = x.get_type().get_shape();
-    auto& idx_shape = idx_val.get_shape();
-    auto& update_shape = update.get_shape();
+    using namespace std::views;
 
     if (idx_shape.size() > update_shape.size()) {
         throw std::logic_error("Error: idx rank cannot be greater than update rank");
@@ -527,6 +506,38 @@ jaxpr_tracer jaxpr_tracer_index::op(value update, primitive_op scatter_op) {
             throw std::logic_error("Error: dimension mismatch between x and update");
         }
     }
+}
+
+jaxpr_tracer jaxpr_tracer_index::get() {
+    value idx_val = get_idx_value();
+
+    auto& x_shape = x.get_type().get_shape();
+    auto& idx_shape = idx_val.get_shape();
+
+    type_t new_type {x.get_type().get_dtype(), new_get_shape(x_shape, idx_shape)};
+
+    auto& jaxpr = x.get_builder().jaxpr;
+    var_t new_var = jaxpr.fresh_var(std::move(new_type));
+
+    jaxpr.equations.emplace_back(
+        std::vector{value{x.get_var()}, std::move(idx_val)},
+        std::vector{new_var},
+        primitive_op::GATHER
+    );
+
+    return jaxpr_tracer{x.get_builder(), new_var};
+}
+
+// Most general case:
+jaxpr_tracer jaxpr_tracer_index::op(value update, primitive_op scatter_op) {
+    using namespace std::views;
+    value idx_val = get_idx_value();
+
+    auto& x_shape = x.get_type().get_shape();
+    auto& idx_shape = idx_val.get_shape();
+    auto& update_shape = update.get_shape();
+
+    validate_scatter_op_shapes(x_shape, idx_shape, update_shape);
 
     auto& jaxpr = x.get_builder().jaxpr;
 

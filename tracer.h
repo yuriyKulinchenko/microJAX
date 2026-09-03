@@ -140,6 +140,34 @@ private:
     std::variant<jaxpr_tracer, jax::array_t> idx;
 };
 
+namespace jax {
+    class array_tracer_index {
+    public:
+        array_tracer_index(array_t& x, jaxpr_tracer idx);
+
+        jaxpr_tracer get();
+
+        jaxpr_tracer set(const jaxpr_tracer& update);
+        jaxpr_tracer set(const array_t& update);
+
+        jaxpr_tracer add(const jaxpr_tracer& update);
+        jaxpr_tracer add(const array_t& update);
+
+        jaxpr_tracer multiply(const jaxpr_tracer& update);
+        jaxpr_tracer multiply(const array_t& update);
+
+        jaxpr_tracer max(const jaxpr_tracer& update);
+        jaxpr_tracer max(const array_t& update);
+
+        jaxpr_tracer min(const jaxpr_tracer& update);
+        jaxpr_tracer min(const array_t& update);
+
+    private:
+        array_t& x;
+        jaxpr_tracer idx;
+    };
+}
+
 jax::value array_value(const jax::array_t& array, jaxpr_builder& builder);
 
 template<std::convertible_to<jax::type_t>... Types, typename F>
