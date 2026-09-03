@@ -554,7 +554,7 @@ namespace jax {
         return value[flatten_index(stride, indices)];
     }
 
-    array_t array_t::slice(const std::vector<size_t>& indices) const {
+    array_t array_t::index(const std::vector<size_t>& indices) const {
         if (indices.empty()) return *this;
 
         if (indices.size() > type.get_shape().size()) {
@@ -576,7 +576,7 @@ namespace jax {
     }
 
     // Precondition is that 'slice' and 'indices' are both valid.
-    void array_t::add_slice(const std::vector<size_t>& indices, const array_t& slice) {
+    void array_t::add_index(const std::vector<size_t>& indices, const array_t& slice) {
         size_t start_index = 0;
         has_single_value_ = false;
         for (size_t i = 0; i < indices.size(); i++) {

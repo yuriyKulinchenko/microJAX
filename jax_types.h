@@ -17,15 +17,39 @@ using f32 = float; // Temporary: these may not be true
 using f64 = double;
 using b8 = uint8_t; // byte-backed boolean
 
+/*
+TODO:
+REDUCE_MAX, REDUCE_MIN
+GATHER
+SCATTER_ADD, SCATTER_MUL, SCATTER_MAX, SCATTER
+RESHAPE
+SQRT, RSQRT
+TANH
+LOGISTIC
+MAX, MIN
+INTEGER_POW
+POW
+CONCATENATE
+SLICE
+PAD
+*/
+
 namespace jax {
 
-#define PRIMITIVE_OP_LIST(X)                    \
-    X(ADD) X(SUB) X(MUL) X(DIV)                 \
-    X(SIN) X(COS) X(EXP) X(LOG)                 \
-    X(NEG) X(TRANSPOSE) X(REDUCE_SUM)           \
-    X(DOT_GENERAL) X(BROADCAST_IN_DIM)          \
-    X(CONVERT_ELEMENT_TYPE) X(COND) X(SCAN)     \
-    X(SELECT) X(EQ) X(NE) X(LT) X(LE) X(GT) X(GE)
+#define PRIMITIVE_OP_LIST(X)                        \
+    X(ADD) X(SUB) X(MUL) X(DIV)                     \
+    X(SIN) X(COS) X(EXP) X(LOG)                     \
+    X(NEG) X(TRANSPOSE) X(REDUCE_SUM)               \
+    X(REDUCE_MAX) X(REDUCE_MIN)                     \
+    X(DOT_GENERAL) X(BROADCAST_IN_DIM)              \
+    X(CONVERT_ELEMENT_TYPE) X(COND) X(SCAN)         \
+    X(SELECT) X(EQ) X(NE) X(LT) X(LE) X(GT) X(GE)   \
+    X(GATHER) X(SCATTER_ADD) X(SCATTER_MUL)         \
+    X(SCATTER_MAX) X(SCATTER_MIN) X(SCATTER)        \
+    X(RESHAPE) X(SQRT) X(RSQRT) X(TANH) X(LOGISTIC) \
+    X(MAX) X(MIN) X(INTEGER_POW) X(POW)             \
+    X(CONCATENATE) X(SLICE) X(PAD)
+
 
 #define TYPE_ENUM_LIST(X) \
     X(I32) X(I64) X(F32) X(F64) X(BOOL)
@@ -202,8 +226,8 @@ namespace jax {
 
         void set_type(type_t new_type);
 
-        [[nodiscard]] array_t slice(const std::vector<size_t>& indices) const;
-        void add_slice(const std::vector<size_t>& indices, const array_t& slice);
+        [[nodiscard]] array_t index(const std::vector<size_t>& indices) const;
+        void add_index(const std::vector<size_t>& indices, const array_t& slice);
 
         [[nodiscard]] bool has_single_value(f64 val) const;
         [[nodiscard]] bool has_single_value() const;
@@ -324,6 +348,14 @@ namespace jax {
         std::vector<size_t> axes;
     };
 
+    struct reduce_max_params {
+        std::vector<size_t> axes;
+    };
+
+    struct reduce_min_params {
+        std::vector<size_t> axes;
+    };
+
     struct broadcast_in_dim_params {
         std::vector<size_t> shape;
         std::vector<size_t> broadcast_dimensions;
@@ -343,6 +375,28 @@ namespace jax {
         size_t num_consts;
         size_t num_carry;
         bool reverse;
+    };
+
+    struct integer_pow_params {
+        size_t y;
+    };
+
+    struct concatenate_params {
+        size_t dimension;
+    };
+
+    struct reshape_params {
+        std::vector<size_t> new_sizes;
+    };
+
+    struct slice_params {
+        std::vector<size_t> start_indices;
+        std::vector<size_t> limit_indices;
+        std::vector<size_t> strides;
+    };
+
+    struct pad_params {
+        std::vector<std::array<size_t, 3>> padding_config; // (low, high, interior) list
     };
 
     using params_variant = std::variant<
@@ -410,7 +464,7 @@ namespace jax {
             } else if constexpr(i < num_consts + num_carry) {
                 return std::move(carry[i - num_consts]);
             } else {
-                return xs[i - num_consts - num_carry].slice({t});
+                return xs[i - num_consts - num_carry].index({t});
             }
         };
 

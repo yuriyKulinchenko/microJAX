@@ -196,7 +196,7 @@ std::vector<array_t> jax_vm::run(const std::vector<array_t>& input) {
                 };
 
                 auto get_xs_slice = [&](const size_t x_index, const size_t slice_index) -> array_t {
-                    return get_input(eq, params.num_consts + params.num_carry + x_index).slice({slice_index});
+                    return get_input(eq, params.num_consts + params.num_carry + x_index).index({slice_index});
                 };
 
                 auto update_carry = [&](std::vector<array_t>& inputs, const std::span<array_t> carries) -> void {
@@ -208,7 +208,7 @@ std::vector<array_t> jax_vm::run(const std::vector<array_t>& input) {
                 // Simultaneous update of multiple ys, across multiple slices:
                 auto update_ys = [&](const size_t slice_index, std::span<array_t> ys_slices) -> void {
                     for (size_t i = 0; i < ys_slices.size(); i++) {
-                        Y[i].add_slice({slice_index}, ys_slices[i]);
+                        Y[i].add_index({slice_index}, ys_slices[i]);
                     }
                 };
 
