@@ -9,6 +9,46 @@ namespace jax {
         return total;
     }
 
+    std::vector<size_t> new_get_shape(const std::vector<size_t>& x_shape, const std::vector<size_t>& idx_shape) {
+        // If x: [n, ms...], idx: [ls...], then .get(): [ls..., ms...]
+        std::vector<size_t> new_shape {};
+        new_shape.reserve(x_shape.size() - 1 + idx_shape.size());
+
+        for (auto dim: idx_shape) new_shape.push_back(dim);
+        for (auto dim: x_shape | std::views::drop(1)) new_shape.push_back(dim);
+
+        return new_shape;
+    }
+
+    void validate_scatter_op_shapes(const std::vector<size_t>& x_shape,
+        const std::vector<size_t>& idx_shape, const std::vector<size_t>& update_shape) {
+        // If x: [n, ms...], idx: [ls...], update: [ls..., ms...], then .op(): [n, ms...]
+
+        using namespace std::views;
+
+        if (idx_shape.size() > update_shape.size()) {
+            throw std::logic_error("Error: idx rank cannot be greater than update rank");
+        }
+
+        for (auto [d1, d2]: zip(idx_shape, update_shape)) {
+            if (d1 != d2) {
+                throw std::logic_error("Error: dimension mismatch between idx and update");
+            }
+        }
+
+        size_t num_ls = idx_shape.size();
+
+        if (x_shape.size() - 1 != update_shape.size() - num_ls) {
+            throw std::logic_error("Error: x and update have incompatible ranks");
+        }
+
+        for (auto [d1, d2]: zip(x_shape | drop(1), update_shape | drop(num_ls))) {
+            if (d1 != d2) {
+                throw std::logic_error("Error: dimension mismatch between x and update");
+            }
+        }
+    }
+
     std::string_view to_string(primitive_op op) {
         switch (op) {
     #define X(name) case primitive_op::name: return #name;

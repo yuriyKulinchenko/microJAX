@@ -139,6 +139,11 @@ namespace jax {
         return idx;
     }
 
+    std::vector<size_t> new_get_shape(const std::vector<size_t>& x_shape,
+        const std::vector<size_t>& idx_shape);
+    void validate_scatter_op_shapes(const std::vector<size_t>& x_shape,
+        const std::vector<size_t>& idx_shape, const std::vector<size_t>& update_shape);
+
     class literal_t {
     public:
         literal_t(dtype_t dtype, double value);
@@ -232,8 +237,8 @@ namespace jax {
         [[nodiscard]] std::vector<double>& get_value();
         [[nodiscard]] std::optional<literal_t> get_literal() const;
 
-        [[nodiscard]] array_tracer_index at(jaxpr_tracer idx) const;
-        [[nodiscard]] array_index at(array_t idx) const;
+        [[nodiscard]] array_tracer_index at(jaxpr_tracer idx);
+        [[nodiscard]] array_index at(array_t idx);
 
         void set_type(type_t new_type);
 
@@ -256,7 +261,7 @@ namespace jax {
 
     class array_index {
     public:
-        array_index(array_t& x, array_t idx);
+        array_index(array_t x, array_t idx);
 
         array_t get();
 
@@ -276,7 +281,7 @@ namespace jax {
         array_t min(const array_t& update);
 
     private:
-        array_t& x;
+        array_t x;
         array_t idx;
     };
 

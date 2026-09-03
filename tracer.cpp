@@ -462,112 +462,40 @@ jaxpr_tracer_index jaxpr_tracer::at(array_t idx) {
     return jaxpr_tracer_index{*this, std::move(idx)};
 }
 
-jaxpr_tracer_index::jaxpr_tracer_index(jaxpr_tracer& x, jaxpr_tracer idx):
-x{x}, idx{std::move(idx)} {}
+jaxpr_tracer_index::jaxpr_tracer_index(jaxpr_tracer x, jaxpr_tracer idx):
+x{std::move(x)}, idx{std::move(idx)} {}
 
-jaxpr_tracer_index::jaxpr_tracer_index(jaxpr_tracer& x, array_t idx):
-x{x}, idx{std::move(idx)} {}
+jaxpr_tracer_index::jaxpr_tracer_index(jaxpr_tracer x, array_t idx):
+x{std::move(x)}, idx{std::move(idx)} {}
 
-static std::vector<size_t> new_get_shape(const std::vector<size_t>& x_shape, const std::vector<size_t>& idx_shape) {
-    // If x: [n, ms...], idx: [ls...], then .get(): [ls..., ms...]
-    std::vector<size_t> new_shape {};
-    new_shape.reserve(x_shape.size() - 1 + idx_shape.size());
+static jaxpr_tracer emit_gather(jaxpr_builder& builder, value x_val, value idx_val) {
+    type_t new_type {x_val.get_dtype(), new_get_shape(x_val.get_shape(), idx_val.get_shape())};
+    var_t new_var = builder.jaxpr.fresh_var(std::move(new_type));
 
-    for (auto dim: idx_shape) new_shape.push_back(dim);
-    for (auto dim: x_shape | std::views::drop(1)) new_shape.push_back(dim);
-
-    return new_shape;
-}
-
-static void validate_scatter_op_shapes(const std::vector<size_t>& x_shape,
-                                       const std::vector<size_t>& idx_shape, const std::vector<size_t>& update_shape) {
-    // If x: [n, ms...], idx: [ls...], update: [ls..., ms...], then .op(): [n, ms...]
-
-    using namespace std::views;
-
-    if (idx_shape.size() > update_shape.size()) {
-        throw std::logic_error("Error: idx rank cannot be greater than update rank");
-    }
-
-    for (auto [d1, d2]: zip(idx_shape, update_shape)) {
-        if (d1 != d2) {
-            throw std::logic_error("Error: dimension mismatch between idx and update");
-        }
-    }
-
-    size_t num_ls = idx_shape.size();
-
-    if (x_shape.size() - 1 != update_shape.size() - num_ls) {
-        throw std::logic_error("Error: x and update have incompatible ranks");
-    }
-
-    for (auto [d1, d2]: zip(x_shape | drop(1), update_shape | drop(num_ls))) {
-        if (d1 != d2) {
-            throw std::logic_error("Error: dimension mismatch between x and update");
-        }
-    }
-}
-
-jaxpr_tracer jaxpr_tracer_index::get() {
-    value idx_val = get_idx_value();
-
-    auto& x_shape = x.get_type().get_shape();
-    auto& idx_shape = idx_val.get_shape();
-
-    type_t new_type {x.get_type().get_dtype(), new_get_shape(x_shape, idx_shape)};
-
-    auto& jaxpr = x.get_builder().jaxpr;
-    var_t new_var = jaxpr.fresh_var(std::move(new_type));
-
-    jaxpr.equations.emplace_back(
-        std::vector{value{x.get_var()}, std::move(idx_val)},
+    builder.jaxpr.equations.emplace_back(
+        std::vector{std::move(x_val), std::move(idx_val)},
         std::vector{new_var},
         primitive_op::GATHER
     );
 
-    return jaxpr_tracer{x.get_builder(), new_var};
+    return {builder, std::move(new_var)};
 }
 
-// Most general case:
-jaxpr_tracer jaxpr_tracer_index::op(value update, primitive_op scatter_op) {
-    using namespace std::views;
-    value idx_val = get_idx_value();
+static jaxpr_tracer emit_scatter(jaxpr_builder& builder, value x_val, value idx_val,
+    value update, primitive_op scatter_op) {
+    validate_scatter_op_shapes(x_val.get_shape(), idx_val.get_shape(), update.get_shape());
 
-    auto& x_shape = x.get_type().get_shape();
-    auto& idx_shape = idx_val.get_shape();
-    auto& update_shape = update.get_shape();
+    type_t new_type {x_val.get_dtype(), x_val.get_shape()};
+    var_t new_var = builder.jaxpr.fresh_var(std::move(new_type));
 
-    validate_scatter_op_shapes(x_shape, idx_shape, update_shape);
-
-    auto& jaxpr = x.get_builder().jaxpr;
-
-    type_t new_type {x.get_type()};
-    var_t new_var = jaxpr.fresh_var(std::move(new_type));
-
-    jaxpr.equations.emplace_back(
-        std::vector{value{x.get_var()}, std::move(idx_val), std::move(update)},
+    builder.jaxpr.equations.emplace_back(
+        std::vector{std::move(x_val), std::move(idx_val), std::move(update)},
         std::vector{new_var},
         scatter_op
     );
 
-    return jaxpr_tracer{x.get_builder(), new_var};
+    return {builder, std::move(new_var)};
 }
-
-#define INDEX_OP(method_name, scatter_op)                                           \
-                                                                                    \
-jaxpr_tracer jaxpr_tracer_index::method_name(const jaxpr_tracer& update) {          \
-    return op(value{update.get_var()}, scatter_op);                                 \
-}                                                                                   \
-                                                                                    \
-jaxpr_tracer jaxpr_tracer_index::method_name(const array_t& update) {               \
-    return op(array_value(update, x.get_builder()), scatter_op);                    \
-}
-
-INDEX_OP(set, primitive_op::SCATTER);
-INDEX_OP(add, primitive_op::SCATTER_ADD);
-INDEX_OP(multiply, primitive_op::SCATTER_MUL);
-INDEX_OP(max, primitive_op::SCATTER_MAX);
-INDEX_OP(min, primitive_op::MIN);
 
 value jaxpr_tracer_index::get_idx_value() {
     if (std::holds_alternative<jaxpr_tracer>(idx)) {
@@ -576,11 +504,93 @@ value jaxpr_tracer_index::get_idx_value() {
     return array_value(std::get<array_t>(idx), x.get_builder());
 }
 
+jaxpr_tracer jaxpr_tracer_index::get() {
+    return emit_gather(x.get_builder(), value{x.get_var()}, get_idx_value());
+}
+
+jaxpr_tracer jaxpr_tracer_index::op(value update, primitive_op scatter_op) {
+    return emit_scatter(x.get_builder(), value{x.get_var()}, get_idx_value(), std::move(update), scatter_op);
+}
+
+#define INDEX_OP(cls, builder_expr, method_name, scatter_op)                        \
+jaxpr_tracer cls::method_name(const jaxpr_tracer& update) {                         \
+    return op(value{update.get_var()}, scatter_op);                                 \
+}                                                                                   \
+jaxpr_tracer cls::method_name(const array_t& update) {                              \
+    return op(array_value(update, builder_expr), scatter_op);                       \
+}
+
+INDEX_OP(jaxpr_tracer_index, x.get_builder(), set, primitive_op::SCATTER)
+INDEX_OP(jaxpr_tracer_index, x.get_builder(), add, primitive_op::SCATTER_ADD)
+INDEX_OP(jaxpr_tracer_index, x.get_builder(), multiply, primitive_op::SCATTER_MUL)
+INDEX_OP(jaxpr_tracer_index, x.get_builder(), max, primitive_op::SCATTER_MAX)
+INDEX_OP(jaxpr_tracer_index, x.get_builder(), min, primitive_op::SCATTER_MIN)
+
+namespace jax {
+
+    array_tracer_index array_t::at(jaxpr_tracer idx) {
+        return array_tracer_index{*this, std::move(idx)};
+    }
+
+    array_index array_t::at(array_t idx) {
+        return array_index{*this, std::move(idx)};
+    }
+
+    array_tracer_index::array_tracer_index(array_t x, jaxpr_tracer idx):
+    x{std::move(x)}, idx{std::move(idx)} {}
+
+    array_index::array_index(array_t x, array_t idx):
+    x{std::move(x)}, idx{std::move(idx)} {}
+
+    jaxpr_tracer array_tracer_index::get() {
+        auto& builder = idx.get_builder();
+        return emit_gather(builder, array_value(x, builder), value{idx.get_var()});
+    }
+
+    jaxpr_tracer array_tracer_index::op(value update, primitive_op scatter_op) {
+        auto& builder = idx.get_builder();
+        return emit_scatter(builder, array_value(x, builder), value{idx.get_var()},
+            std::move(update), scatter_op);
+    }
+
+    INDEX_OP(array_tracer_index, idx.get_builder(), set, primitive_op::SCATTER)
+    INDEX_OP(array_tracer_index, idx.get_builder(), add, primitive_op::SCATTER_ADD)
+    INDEX_OP(array_tracer_index, idx.get_builder(), multiply, primitive_op::SCATTER_MUL)
+    INDEX_OP(array_tracer_index, idx.get_builder(), max, primitive_op::SCATTER_MAX)
+    INDEX_OP(array_tracer_index, idx.get_builder(), min, primitive_op::SCATTER_MIN)
+
+#define ARRAY_INDEX_TRACER_OP(method_name, scatter_op)                             \
+    jaxpr_tracer array_index::method_name(const jaxpr_tracer& update) {            \
+        auto& builder = update.get_builder();                                      \
+        return emit_scatter(builder, array_value(x, builder),                      \
+            array_value(idx, builder), value{update.get_var()}, scatter_op);       \
+    }
+
+    ARRAY_INDEX_TRACER_OP(set, primitive_op::SCATTER)
+    ARRAY_INDEX_TRACER_OP(add, primitive_op::SCATTER_ADD)
+    ARRAY_INDEX_TRACER_OP(multiply, primitive_op::SCATTER_MUL)
+    ARRAY_INDEX_TRACER_OP(max, primitive_op::SCATTER_MAX)
+    ARRAY_INDEX_TRACER_OP(min, primitive_op::SCATTER_MIN)
+
+#undef ARRAY_INDEX_TRACER_OP
+
+}
+
+#undef INDEX_OP
+
 
 jaxpr_tracer jaxpr_builder::register_tracer(type_t type) {
     auto var = var_t{jaxpr.new_var_id(), std::move(type)};
     jaxpr.invars.push_back(var);
     return {*this, std::move(var)};
+}
+
+// Note: this does NOT work for arrays with rank 0
+jaxpr_tracer jaxpr_builder::register_tracer(const array_t& array) {
+    if (array.get_type().get_shape().size() == 0) {
+        throw std::logic_error("Error: cannot register scalar array as tracer");
+    }
+    return jaxpr_tracer{*this, array_value(array, *this).get_var()};
 }
 
 void jaxpr_builder::register_output(const jaxpr_tracer& tracer) {

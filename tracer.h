@@ -74,6 +74,7 @@ private:
 class jaxpr_builder {
 public:
     jaxpr_tracer register_tracer(jax::type_t type);
+    jaxpr_tracer register_tracer(const jax::array_t& array);
     void register_output(const jaxpr_tracer& tracer);
     void register_output(const jax::value& value);
     void register_output(const jax::literal_t& literal);
@@ -111,8 +112,8 @@ method. jaxpr_tracer_index holds a reference to the underlying tensor object,
 
 class jaxpr_tracer_index {
 public:
-    jaxpr_tracer_index(jaxpr_tracer& x, jaxpr_tracer idx);
-    jaxpr_tracer_index(jaxpr_tracer& x, jax::array_t idx);
+    jaxpr_tracer_index(jaxpr_tracer x, jaxpr_tracer idx);
+    jaxpr_tracer_index(jaxpr_tracer x, jax::array_t idx);
 
     jaxpr_tracer get();
 
@@ -136,14 +137,14 @@ private:
     jax::value get_idx_value();
     jaxpr_tracer op(jax::value update, jax::primitive_op scatter_op);
 
-    jaxpr_tracer& x;
+    jaxpr_tracer x;
     std::variant<jaxpr_tracer, jax::array_t> idx;
 };
 
 namespace jax {
     class array_tracer_index {
     public:
-        array_tracer_index(array_t& x, jaxpr_tracer idx);
+        array_tracer_index(array_t x, jaxpr_tracer idx);
 
         jaxpr_tracer get();
 
@@ -163,7 +164,9 @@ namespace jax {
         jaxpr_tracer min(const array_t& update);
 
     private:
-        array_t& x;
+        jaxpr_tracer op(value update, primitive_op scatter_op);
+
+        array_t x;
         jaxpr_tracer idx;
     };
 }
