@@ -21,32 +21,48 @@ T softmax(T vec) {
 void switch_example();
 void scan_example();
 void select_example();
+void gather_example();
 void scatter_gather_example();
 
 int main() {
-    scatter_gather_example();
+    gather_example();
     return 0;
 }
 
 
 void scatter_gather_example() {
+    // using namespace jax;
+    // using enum dtype_t;
+    //
+    // jaxpr_builder builder {};
+    //
+    // // Take an array of length 100, split it into contiguous sections of size 10, and softmax each section:
+    //
+    // auto x = builder.register_tracer(F32, 100);
+    // auto idx = array_t::build(I32, {100}, [](const std::vector<size_t>& indicies) -> double {
+    //     return indicies[0] / 10;
+    // });
+    //
+    // auto exp_x = exp(x);
+    // auto denom = array_t::zeros({10}).at(idx).add(exp_x);
+    // auto smax = exp_x / denom.at(idx).get(); // shape = (100,)
+    //
+    // builder.register_output(reduce_sum(smax, {0}));
+}
+
+void gather_example() {
     using namespace jax;
     using enum dtype_t;
 
     jaxpr_builder builder {};
 
-    // Take an array of length 100, split it into contiguous sections of size 10, and softmax each section:
+    auto x = builder.register_tracer(F32, 100, 24);
+    auto idx = builder.register_tracer(I32, 10, 10);
 
-    auto x = builder.register_tracer(F32, 100);
-    auto indicies = array_t::build(I32, {100}, [](const std::vector<size_t>& indicies) -> double {
-        return indicies[0] / 10;
-    });
+    builder.register_output(x.at(idx).get());
 
-    auto exp_x = exp(x);
-    auto denom = array_t::zeros({10}).at(indicies).add(exp_x);
-    auto smax = exp_x / denom.at(indicies).get(); // shape = (100,)
-
-    builder.register_output(reduce_sum(smax, {0}));
+    auto jaxpr = builder.get_jaxpr();
+    std::cout << "Original expression:\n" << jaxpr;
 }
 
 void select_example() {

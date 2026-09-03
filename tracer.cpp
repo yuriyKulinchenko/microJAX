@@ -454,19 +454,53 @@ jaxpr_tracer jaxpr_tracer::dot_general(
     return {builder, std::move(new_var)};
 }
 
-jaxpr_tracer_index jaxpr_tracer::at(jaxpr_tracer idx) const {
+jaxpr_tracer_index jaxpr_tracer::at(jaxpr_tracer idx) {
     return jaxpr_tracer_index{*this, std::move(idx)};
 }
 
-jaxpr_tracer_index jaxpr_tracer::at(array_t idx) const {
+jaxpr_tracer_index jaxpr_tracer::at(array_t idx) {
     return jaxpr_tracer_index{*this, std::move(idx)};
 }
 
-jaxpr_tracer_index::jaxpr_tracer_index(const jaxpr_tracer& x, jaxpr_tracer idx):
+jaxpr_tracer_index::jaxpr_tracer_index(jaxpr_tracer& x, jaxpr_tracer idx):
 x{x}, idx{std::move(idx)} {}
 
-jaxpr_tracer_index::jaxpr_tracer_index(const jaxpr_tracer& x, array_t idx):
+jaxpr_tracer_index::jaxpr_tracer_index(jaxpr_tracer& x, array_t idx):
 x{x}, idx{std::move(idx)} {}
+
+jaxpr_tracer jaxpr_tracer_index::get() {
+    value idx_val = get_idx_value();
+
+    // If x: [n, ms...], idx: [ls...], then .get(): [ls..., ms...]
+
+    const std::vector<size_t>& x_shape = x.get_type().get_shape();
+
+    std::vector<size_t> new_shape {};
+    new_shape.reserve(x_shape.size() - 1 + idx_val.get_shape().size());
+
+    for (auto dim: idx_val.get_shape()) new_shape.push_back(dim);
+    for (auto dim: x_shape | std::views::drop(1)) new_shape.push_back(dim);
+
+    auto& jaxpr = x.get_builder().jaxpr;
+
+    type_t new_type {x.get_type().get_dtype(), std::move(new_shape)};
+    var_t new_var = jaxpr.fresh_var(std::move(new_type));
+
+    jaxpr.equations.emplace_back(
+        std::vector{value{x.get_var()}, std::move(idx_val)},
+        std::vector{new_var},
+        primitive_op::GATHER
+    );
+
+    return jaxpr_tracer{x.get_builder(), new_var};
+}
+
+value jaxpr_tracer_index::get_idx_value() {
+    if (std::holds_alternative<jaxpr_tracer>(idx)) {
+        return value{std::get<jaxpr_tracer>(idx).get_var()};
+    }
+    return array_value(std::get<array_t>(idx), x.get_builder());
+}
 
 
 jaxpr_tracer jaxpr_builder::register_tracer(type_t type) {

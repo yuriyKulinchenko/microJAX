@@ -60,8 +60,8 @@ public:
         std::vector<size_t> left_batch,
         std::vector<size_t> right_batch) const;
 
-    [[nodiscard]] jaxpr_tracer_index at(jaxpr_tracer idx) const;
-    [[nodiscard]] jaxpr_tracer_index at(jax::array_t idx) const;
+    [[nodiscard]] jaxpr_tracer_index at(jaxpr_tracer idx);
+    [[nodiscard]] jaxpr_tracer_index at(jax::array_t idx);
 
     template<typename... Fs, typename... Ts>
     [[nodiscard]] auto switch_on(std::tuple<Fs...> branches, const Ts&... vals) const;
@@ -111,8 +111,8 @@ method. jaxpr_tracer_index holds a reference to the underlying tensor object,
 
 class jaxpr_tracer_index {
 public:
-    jaxpr_tracer_index(const jaxpr_tracer& x, jaxpr_tracer idx);
-    jaxpr_tracer_index(const jaxpr_tracer& x, jax::array_t idx);
+    jaxpr_tracer_index(jaxpr_tracer& x, jaxpr_tracer idx);
+    jaxpr_tracer_index(jaxpr_tracer& x, jax::array_t idx);
 
     jaxpr_tracer get();
 
@@ -133,7 +133,10 @@ public:
     jaxpr_tracer min(jax::array_t update);
 
 private:
-    const jaxpr_tracer& x;
+
+    jax::value get_idx_value();
+
+    jaxpr_tracer& x;
     std::variant<jaxpr_tracer, jax::array_t> idx;
 };
 
