@@ -29,7 +29,7 @@ LOGISTIC
 MAX, MIN
 INTEGER_POW
 POW
-CONCATENATE
+CONCATENATE // Done
 SLICE
 PAD
 */
@@ -603,6 +603,56 @@ namespace jax {
         }
 
         return output;
+    }
+
+    template<size_t N>
+    array_t array_concatenate(std::array<array_t, N> values, size_t axis) {
+        // Dimensions have to match:
+        array_t& first_value = values[0];
+        auto& first_shape = first_value.get_type().get_shape();
+        dtype_t dtype = first_value.get_type().get_dtype();
+        size_t rank = first_shape.size();
+        size_t concat_size = first_shape[axis];
+
+        for (array_t& val: values | std::views::drop(1)) {
+            if (val.get_type().get_dtype() != dtype) {
+                // TODO: maybe perform implicit conversion?
+                throw std::logic_error("Error: dtype mismatch when attempting concatenation");
+            }
+
+            auto& current_shape = val.get_type().get_shape();
+            if (current_shape.size() != rank) {
+                throw std::logic_error("Error: rank mismatch when attempting concatenation");
+            }
+
+            concat_size += current_shape[axis];
+            for (size_t r = 0; r < rank; r++) {
+                if (r == axis) continue;
+                if (current_shape[r] != first_shape[r]) {
+                    throw std::logic_error("Error: dimension mismatch when attempting concatenation");
+                }
+            }
+        }
+
+        std::vector new_shape {first_shape};
+        new_shape[axis] = concat_size;
+
+        array_t result {type_t{dtype, new_shape}, std::vector<double>(num_elements(new_shape), 0)};
+
+        size_t concatenate_dimension_offset = 0;
+        for (size_t tensor_index = 0; tensor_index < N; tensor_index++) {
+            const auto& source_shape = values[tensor_index].get_type().get_shape();
+            std::vector<size_t> indicies (rank, 0);
+            for (auto& is: cartesian_product{indicies, source_shape}) {
+                double value = values[tensor_index][is];
+                indicies[axis] += concatenate_dimension_offset;
+                result.access(indicies) = value;
+                indicies[axis] -= concatenate_dimension_offset;
+            }
+            concatenate_dimension_offset += source_shape[axis];
+        }
+
+        return result;
     }
 }
 

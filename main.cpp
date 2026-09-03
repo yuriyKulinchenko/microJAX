@@ -23,10 +23,27 @@ void scan_example();
 void select_example();
 void gather_example();
 void scatter_gather_example();
+void concatenate_example();
 
 int main() {
-    scatter_gather_example();
+    concatenate_example();
     return 0;
+}
+
+void concatenate_example() {
+    using namespace jax;
+    using enum dtype_t;
+
+    jaxpr_builder builder {};
+
+    auto x = builder.register_tracer(F32, 100, 32, 50);
+    auto y = builder.register_tracer(F32, 100, 16, 50);
+    auto z = builder.register_tracer(F32, 100, 10, 50);
+
+    builder.register_output(concatenate(std::tuple{x, y, z}, 1));
+
+    auto jaxpr = builder.get_jaxpr();
+    std::cout << "Original expression:\n" << jaxpr;
 }
 
 

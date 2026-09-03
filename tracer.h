@@ -455,6 +455,50 @@ namespace jax {
 
         return jaxpr_tracer{builder, output};
     }
+
+    template<size_t N>
+    jaxpr_tracer tracer_concatenate(jaxpr_builder& builder, std::array<value, N> values, size_t axis) {
+        // Dimensions have to match:
+        std::vector<size_t>& first_shape = values[0].get_shape();
+        dtype_t dtype = values[0].get_dtype();
+        size_t rank = first_shape.size();
+        size_t concat_size = first_shape[axis];
+
+        for (auto& val: values | std::views::drop(1)) {
+            if (val.get_dtype() != dtype) {
+                // TODO: maybe perform implicit conversion?
+                throw std::logic_error("Error: dtype mismatch when attempting concatenation");
+            }
+
+            auto& current_shape = val.get_shape();
+            if (current_shape.size() != rank) {
+                throw std::logic_error("Error: rank mismatch when attempting concatenation");
+            }
+            concat_size += current_shape[axis];
+            for (size_t r = 0; r < rank; r++) {
+                if (r == axis) continue;
+                if (current_shape[r] != first_shape[r]) {
+                    throw std::logic_error("Error: dimension mismatch when attempting concatenation");
+                }
+            }
+        }
+
+        std::vector new_shape {first_shape};
+        new_shape[axis] = concat_size;
+
+        var_t concat_var = builder.jaxpr.fresh_var(type_t{dtype, std::move(new_shape)});
+
+        builder.jaxpr.equations.emplace_back(
+            std::vector(values.begin(), values.end()),
+            std::vector{concat_var},
+            primitive_op::CONCATENATE,
+            concatenate_params {
+            .dimension = axis
+            }
+        );
+
+        return jaxpr_tracer{builder, concat_var};
+    }
 }
 
 #endif //TRACER_H

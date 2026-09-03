@@ -198,6 +198,47 @@ namespace jax {
             return array_select(pred, values...);
         }
     }
+
+    template<typename... Ts>
+    requires tracer_or_array_tuple<Ts...>
+
+    auto concatenate(std::tuple<Ts...> values, size_t axis) {
+
+        using find_tracer = tuple_find_type_instance<std::tuple<Ts...>, jaxpr_tracer>;
+        constexpr size_t N = sizeof...(Ts);
+
+        if constexpr (find_tracer::exists) {
+            constexpr size_t I = find_tracer::index;
+            auto& builder = static_cast<jaxpr_tracer&>(std::get<I>(values)).get_builder();
+            // Convert each element in 'values' into a value:
+
+            auto convert_to_value = [&]<typename T>(T& val) -> value {
+                if constexpr (std::convertible_to<T, jaxpr_tracer>) {
+                    return value{static_cast<jaxpr_tracer&>(val).get_var()};
+                } else {
+                    return array_value(static_cast<array_t&>(val), builder);
+                }
+            };
+
+            std::array<value, N> processed_value_array
+            = std::invoke([&]<size_t... Is>(std::index_sequence<Is...>) -> std::array<value, N> {
+                return {convert_to_value(std::get<Is>(values))...};
+            }, std::make_index_sequence<N>());
+
+            return tracer_concatenate(builder, std::move(processed_value_array), axis);
+
+        } else {
+            // values is a tuple of array_t:
+
+            std::array<array_t, N> processed_value_array
+            = std::invoke([&]<size_t... Is>(std::index_sequence<Is...>) -> std::array<value, N> {
+                return {std::get<Is>(values)...};
+            }, std::make_index_sequence<N>());
+
+            return array_concatenate(std::move(processed_value_array), axis);
+        }
+
+    }
 }
 
 
