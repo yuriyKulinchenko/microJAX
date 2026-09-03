@@ -613,6 +613,40 @@ void jaxpr_builder::register_output(const array_t& array) {
     register_output(array_value(array, *this));
 }
 
+jaxpr_tracer jaxpr_builder::full(std::vector<size_t> shape, double val, dtype_t dtype) {
+    var_t projected_var = jaxpr.fresh_var(type_t{dtype, shape});
+    jaxpr.equations.emplace_back(
+        std::vector{value{literal_t{dtype, val}}},
+        std::vector{projected_var},
+        primitive_op::BROADCAST_IN_DIM,
+        broadcast_in_dim_params {
+        .shape = std::move(shape),
+        .broadcast_dimensions = {}
+        }
+    );
+    return jaxpr_tracer{*this, std::move(projected_var)};
+}
+
+jaxpr_tracer jaxpr_builder::full(size_t shape, double val, dtype_t dtype) {
+    return full(std::vector{shape}, val, dtype);
+}
+
+jaxpr_tracer jaxpr_builder::zeros(std::vector<size_t> shape, dtype_t dtype) {
+    return full(std::move(shape), 0, dtype);
+}
+
+jaxpr_tracer jaxpr_builder::zeros(size_t shape, dtype_t dtype) {
+    return full(shape, 0, dtype);
+}
+
+jaxpr_tracer jaxpr_builder::ones(std::vector<size_t> shape, dtype_t dtype) {
+    return full(std::move(shape), 1, dtype);
+}
+
+jaxpr_tracer jaxpr_builder::ones(size_t shape, dtype_t dtype) {
+    return full(shape, 1, dtype);
+}
+
 expression&& jaxpr_builder::get_jaxpr() {
     return std::move(jaxpr);
 }

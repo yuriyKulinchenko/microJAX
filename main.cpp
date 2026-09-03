@@ -46,7 +46,7 @@ void scatter_gather_example() {
     auto x = builder.register_tracer(F32, 100);
 
     auto exp_x = exp(x);
-    auto denom = array_t::zeros({10}).at(idx).add(exp_x);
+    auto denom = builder.zeros(10).at(idx).add(exp_x);
     auto smax = exp_x / denom.at(idx).get(); // shape = (100,)
 
     builder.register_output(reduce_sum(smax, {0}));

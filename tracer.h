@@ -81,6 +81,15 @@ public:
     void register_output(const jax::var_t& var);
     void register_output(const jax::array_t& array);
 
+    jaxpr_tracer full(std::vector<size_t> shape, double val, jax::dtype_t dtype = jax::dtype_t::F32);
+    jaxpr_tracer full(size_t shape, double val, jax::dtype_t dtype = jax::dtype_t::F32);
+
+    jaxpr_tracer zeros(std::vector<size_t> shape, jax::dtype_t dtype = jax::dtype_t::F32);
+    jaxpr_tracer zeros(size_t shape, jax::dtype_t dtype = jax::dtype_t::F32);
+
+    jaxpr_tracer ones(std::vector<size_t> shape, jax::dtype_t dtype = jax::dtype_t::F32);
+    jaxpr_tracer ones(size_t shape, jax::dtype_t dtype = jax::dtype_t::F32);
+
     template<typename TupleContainer>
     void register_output(const TupleContainer& container) {
         constexpr size_t tuple_size = std::tuple_size_v<TupleContainer>;
