@@ -346,7 +346,8 @@ namespace jax {
         return array_t{type_t{type.get_dtype(), std::move(shape)}, std::move(new_value)};
     }
 
-    array_t array_t::reduce_sum(const std::vector<size_t>& axes) const {
+    template<double Identity, double (*BinaryOp)(double, double)>
+    array_t array_t::reduce_monoid(const std::vector<size_t>& axes) const {
         std::vector<size_t> remaining_axes = complement(axes, type.get_shape().size());
         std::vector<size_t> axes_sizes = extract_shape(axes, type.get_shape());
         std::vector<size_t> new_shape = extract_shape(remaining_axes, type.get_shape());
@@ -361,21 +362,36 @@ namespace jax {
         };
 
         std::vector<size_t> remaining_indices(remaining_axes.size(), 0);
-        std::vector<size_t> sum_indices(axes.size(), 0);
+        std::vector<size_t> op_indices(axes.size(), 0);
 
 
-        std::vector<double> new_value(num_elements(new_shape), 0);
+        std::vector new_value(num_elements(new_shape), Identity);
         size_t i = 0;
 
         for (auto& r: cartesian_product{remaining_indices, new_shape}) {
-            // reduce[r] = sum_s {x[r, s]}
-            for (auto& s: cartesian_product{sum_indices, axes_sizes}) {
-                new_value[i] += tensor_access(r, s);
+            // reduce[r] = op_s {x[r, s]}
+            for (auto& s: cartesian_product{op_indices, axes_sizes}) {
+                new_value[i] = BinaryOp(new_value[i], tensor_access(r, s));
             }
             i++;
         }
 
         return array_t{type_t{type.get_dtype(), std::move(new_shape)}, std::move(new_value)};
+    }
+
+    array_t array_t::reduce_sum(const std::vector<size_t>& axes) const {
+        return reduce_monoid<0.,
+        [](double x, double y){return x + y;}>(axes);
+    }
+
+    array_t array_t::reduce_max(const std::vector<size_t>& axes) const {
+        return reduce_monoid<std::numeric_limits<double>::lowest(),
+        [](double x, double y) {return std::max(x, y);}>(axes);
+    }
+
+    array_t array_t::reduce_min(const std::vector<size_t>& axes) const {
+        return reduce_monoid<std::numeric_limits<double>::max(),
+        [](double x, double y) {return std::min(x, y);}>(axes);
     }
 
     array_t array_t::transpose(const std::vector<size_t>& permutation) const {

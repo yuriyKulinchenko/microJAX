@@ -47,6 +47,9 @@ public:
 
     [[nodiscard]] jaxpr_tracer transpose(std::vector<size_t> permutation) const;
     [[nodiscard]] jaxpr_tracer reduce_sum(std::vector<size_t> axes) const;
+    [[nodiscard]] jaxpr_tracer reduce_max(std::vector<size_t> axes) const;
+    [[nodiscard]] jaxpr_tracer reduce_min(std::vector<size_t> axes) const;
+
     [[nodiscard]] jaxpr_tracer convert_element_type(jax::dtype_t dtype) const;
 
     [[nodiscard]] jaxpr_tracer broadcast_in_dim(
@@ -67,6 +70,9 @@ public:
     [[nodiscard]] auto switch_on(std::tuple<Fs...> branches, const Ts&... vals) const;
 
 private:
+    template<typename ParamType>
+    [[nodiscard]] jaxpr_tracer reduce_monoid(std::vector<size_t> axes, jax::primitive_op op) const;
+
     jax::var_t var;
     jaxpr_builder& builder;
 };

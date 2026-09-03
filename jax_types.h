@@ -19,9 +19,9 @@ using b8 = uint8_t; // byte-backed boolean
 
 /*
 TODO:
-REDUCE_MAX, REDUCE_MIN
-GATHER
-SCATTER_ADD, SCATTER_MUL, SCATTER_MAX, SCATTER
+REDUCE_MAX, REDUCE_MIN // Done
+GATHER // Done
+SCATTER_ADD, SCATTER_MUL, SCATTER_MAX, SCATTER // Done
 RESHAPE
 SQRT, RSQRT
 TANH
@@ -217,7 +217,11 @@ namespace jax {
         [[nodiscard]] array_t operator-() const;
 
         [[nodiscard]] array_t transpose(const std::vector<size_t>& permutation) const;
+
         [[nodiscard]] array_t reduce_sum(const std::vector<size_t>& axes) const;
+        [[nodiscard]] array_t reduce_max(const std::vector<size_t>& axes) const;
+        [[nodiscard]] array_t reduce_min(const std::vector<size_t>& axes) const;
+
         [[nodiscard]] array_t convert_element_type(dtype_t dtype) const;
 
         [[nodiscard]] array_t broadcast_in_dim(
@@ -250,6 +254,8 @@ namespace jax {
         void compute_strides();
 
     private:
+        template<double Identity, double (*BinaryOp)(double, double)>
+        [[nodiscard]] array_t reduce_monoid(const std::vector<size_t>& axes) const;
         void check_single_value();
 
         type_t type;
@@ -446,10 +452,17 @@ namespace jax {
         transpose_params,
         dot_general_params,
         reduce_sum_params,
+        reduce_max_params,
+        reduce_min_params,
         broadcast_in_dim_params,
         convert_element_type_params,
         cond_params,
-        scan_params
+        scan_params,
+        integer_pow_params,
+        concatenate_params,
+        reshape_params,
+        slice_params,
+        pad_params
     >;
 
     class equation {

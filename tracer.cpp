@@ -259,7 +259,8 @@ jaxpr_tracer jaxpr_tracer::transpose(std::vector<size_t> permutation) const {
         transpose_params{std::move(permutation)}, builder);
 }
 
-jaxpr_tracer jaxpr_tracer::reduce_sum(std::vector<size_t> axes) const {
+template<typename ParamType>
+jaxpr_tracer jaxpr_tracer::reduce_monoid(std::vector<size_t> axes, primitive_op op) const {
     // Axes must be valid:
 
     const auto& old_shape = var.get_type().get_shape();
@@ -269,11 +270,11 @@ jaxpr_tracer jaxpr_tracer::reduce_sum(std::vector<size_t> axes) const {
     for (size_t i = 0; i < axes.size(); i++) {
         if (axes[i] >= old_shape.size()) {
             throw formatted_error(
-                    "Error: axis {} does not exist for the given argument in reduce_sum", axes[i]);
+                    "Error: axis {} does not exist for the given argument in {}", axes[i], to_lower(to_string(op)));
         }
         if (i > 0 && axes[i] == max) {
             throw formatted_error(
-                    "Error: axis {} is included more than once in reduce_sum", axes[i]);
+                    "Error: axis {} is included more than once in {}", axes[i], to_lower(to_string(op)));
         }
         max = axes[i];
     }
@@ -288,8 +289,20 @@ jaxpr_tracer jaxpr_tracer::reduce_sum(std::vector<size_t> axes) const {
 
     type_t new_type {var.get_type().get_dtype(), std::move(new_shape)};
 
-    return unary_op(value{var}, std::move(new_type), primitive_op::REDUCE_SUM,
-        reduce_sum_params{std::move(axes)}, builder);
+    return unary_op(value{var}, std::move(new_type), op,
+        ParamType{std::move(axes)}, builder);
+}
+
+jaxpr_tracer jaxpr_tracer::reduce_sum(std::vector<size_t> axes) const {
+    return reduce_monoid<reduce_sum_params>(std::move(axes), primitive_op::REDUCE_SUM);
+}
+
+jaxpr_tracer jaxpr_tracer::reduce_max(std::vector<size_t> axes) const {
+    return reduce_monoid<reduce_max_params>(std::move(axes), primitive_op::REDUCE_MAX);
+}
+
+jaxpr_tracer jaxpr_tracer::reduce_min(std::vector<size_t> axes) const {
+    return reduce_monoid<reduce_min_params>(std::move(axes), primitive_op::REDUCE_MIN);
 }
 
 jaxpr_tracer jaxpr_tracer::convert_element_type(dtype_t dtype) const {
