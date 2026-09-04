@@ -432,11 +432,11 @@ namespace jax {
     }
 
     template<double(*BinaryOp)(double, double), array_like A, array_like B>
-    array_t array_binary_elementwise_op(const A& a, const B& b) {
+    array_t array_binary_elementwise_op(const A& a, const B& b, std::optional<dtype_t> out_dtype = std::nullopt) {
         const std::vector<size_t>& a_shape = a.get_type().get_shape();
         const std::vector<size_t>& b_shape = b.get_type().get_shape();
 
-        dtype_t dtype = resultant_type(a.get_type().get_dtype(), b.get_type().get_dtype());
+        dtype_t dtype = out_dtype.value_or(resultant_type(a.get_type().get_dtype(), b.get_type().get_dtype()));
 
         // Fast path: identical shapes need no broadcasting, so zip the buffers directly.
         if (std::ranges::equal(a_shape, b_shape)) {
@@ -488,9 +488,19 @@ namespace jax {
     // This assumes a matching dimension: no broadcast
     template<double(*BinaryOp)(double, double), array_like A, array_like B>
     A& array_binary_inplace_op(A& a, const B& b) {
+        if (a.get_value().size() != b.get_value().size()) {
+            throw std::logic_error("Error: in-place op requires operands of matching size (no broadcast)");
+        }
         for (auto&& [x, y]: std::views::zip(a.get_value(), b.get_value())) {
             x = BinaryOp(x, y);
         }
+        return a;
+    }
+
+    // Scalar broadcast: applies BinaryOp(x, b) to every element in place.
+    template<double(*BinaryOp)(double, double), array_like A>
+    A& array_binary_inplace_scalar_op(A& a, double b) {
+        for (auto&& x: a.get_value()) x = BinaryOp(x, b);
         return a;
     }
 
@@ -530,32 +540,38 @@ namespace jax {
 
 #undef ELEMENTWISE_UNARY_OP
 
-#define ELEMENTWISE_BINARY_OP(op_name, return_expr)                                                         \
-    template<array_like A, array_like B>                                                                    \
-    array_t op_name(const A& a, const B& b) {                                                               \
-        return array_binary_elementwise_op<[](double x, double y) -> double {return (return_expr);}>(a, b); \
-    }                                                                                                       \
-    template<array_like A>                                                                                  \
-    array_t op_name(const A& a, double b) { return op_name(a, array_t{b}); }                                \
-    template<array_like B>                                                                                  \
+#define ELEMENTWISE_BINARY_OP_DTYPE(op_name, return_expr, out_dtype)                                                  \
+    template<array_like A, array_like B>                                                                              \
+    array_t op_name(const A& a, const B& b) {                                                                         \
+        return array_binary_elementwise_op<[](double x, double y) -> double {return (return_expr);}>(a, b, out_dtype);\
+    }                                                                                                                 \
+    template<array_like A>                                                                                            \
+    array_t op_name(const A& a, double b) { return op_name(a, array_t{b}); }                                          \
+    template<array_like B>                                                                                            \
     array_t op_name(double a, const B& b) { return op_name(array_t{a}, b); }
+
+    // Arithmetic keeps the promoted (resultant) dtype, comparisons yield BOOL.
+#define ELEMENTWISE_BINARY_OP(op_name, return_expr) ELEMENTWISE_BINARY_OP_DTYPE(op_name, return_expr, std::nullopt)
+#define ELEMENTWISE_COMPARISON_OP(op_name, return_expr) ELEMENTWISE_BINARY_OP_DTYPE(op_name, return_expr, dtype_t::BOOL)
 
     ELEMENTWISE_BINARY_OP(operator+, x + y);
     ELEMENTWISE_BINARY_OP(operator-, x - y);
     ELEMENTWISE_BINARY_OP(operator*, x * y);
     ELEMENTWISE_BINARY_OP(operator/, x / y);
 
-    ELEMENTWISE_BINARY_OP(elementwise_equal, double_eq(x, y));
-    ELEMENTWISE_BINARY_OP(elementwise_not_equal, !double_eq(x, y));
-    ELEMENTWISE_BINARY_OP(operator<, x < y);
-    ELEMENTWISE_BINARY_OP(operator>, x > y);
-    ELEMENTWISE_BINARY_OP(operator<=, x <= y);
-    ELEMENTWISE_BINARY_OP(operator>=, x >= y);
+    ELEMENTWISE_COMPARISON_OP(elementwise_equal, double_eq(x, y));
+    ELEMENTWISE_COMPARISON_OP(elementwise_not_equal, !double_eq(x, y));
+    ELEMENTWISE_COMPARISON_OP(operator<, x < y);
+    ELEMENTWISE_COMPARISON_OP(operator>, x > y);
+    ELEMENTWISE_COMPARISON_OP(operator<=, x <= y);
+    ELEMENTWISE_COMPARISON_OP(operator>=, x >= y);
 
     ELEMENTWISE_BINARY_OP(min, std::min(x, y));
     ELEMENTWISE_BINARY_OP(max, std::max(x, y));
 
+#undef ELEMENTWISE_COMPARISON_OP
 #undef ELEMENTWISE_BINARY_OP
+#undef ELEMENTWISE_BINARY_OP_DTYPE
 
 #define ARRAY_INDEX_SCATTER_OP(op_name, return_expr)                                        \
     template<array_like A>                                                                  \
@@ -576,6 +592,11 @@ namespace jax {
     template<array_like A, array_like B>                                                        \
     A&& op_name(A&& a, const B& b) {                                                            \
         array_binary_inplace_op<[](double x, double y){return (return_expr);}>(a, b);           \
+        return std::forward<A>(a);                                                              \
+    }                                                                                           \
+    template<array_like A>                                                                      \
+    A&& op_name(A&& a, double b) {                                                              \
+        array_binary_inplace_scalar_op<[](double x, double y){return (return_expr);}>(a, b);    \
         return std::forward<A>(a);                                                              \
     }
 
