@@ -1,9 +1,6 @@
-#include "tracer.h"
-
 #include <optional>
 #include <unordered_set>
-
-#include "jax_functions.h"
+#include "tracer.h"
 
 using namespace jax;
 
@@ -572,6 +569,59 @@ namespace jax {
 
     array_index::array_index(array_t x, array_t idx):
     x{std::move(x)}, idx{std::move(idx)} {}
+
+    array_t array_index::get() {
+        // idx has to be an integral type: this has not been checked
+        // If x: [n, ms...], idx: [ls...], then .get(): [ls..., ms...]
+
+        auto& x_shape = x.get_type().get_shape();
+        std::vector x_inner_shape (x_shape.begin() + 1, x_shape.end());
+        auto& idx_shape = idx.get_type().get_shape();
+
+        std::vector new_shape{new_get_shape(x_shape, idx_shape)};
+        // I need to collect a slice:
+
+        std::vector<size_t> idx_indicies (idx_shape.size(), 0);
+        std::vector<size_t> x_inner_indicies (x_inner_shape.size(), 0);
+        std::vector<size_t> x_indicies (x_shape.size(), 0); // This indexes into 'x'
+
+        std::vector<double> value_buffer {};
+        value_buffer.reserve(num_elements(new_shape));
+
+        for (auto& ls: cartesian_product{idx_indicies, idx_shape}) {
+            size_t i = static_cast<size_t>(idx[ls]);
+            for (auto& ms: cartesian_product {x_inner_indicies, x_inner_shape}) {
+                // Take [i, ms]
+                x_indicies[0] = i;
+                std::ranges::copy(ms, x_indicies.begin() + 1);
+                value_buffer.push_back(x[x_indicies]);
+            }
+        }
+
+        type_t new_type {x.get_type().get_dtype(), std::move(new_shape)};
+        return array_t{std::move(new_type), std::move(value_buffer)};
+    }
+
+    // TODO: Make this generic over monoids
+    // TODO: rework how array slices work! way too much copying going on
+    array_t array_index::add(const array_t& update) {
+        // If x: [n, ms...], idx: [ls...], update: [ls..., ms...], then .op(): [n, ms...]
+        // Iterate through each idx, fetch an update slice, set the appropriate x.
+
+        auto& idx_shape = idx.get_type().get_shape();
+
+        std::vector<size_t> idx_indicies (idx_shape.size(), 0);
+
+        array_t updated_x {x};
+
+        for (auto& ls: cartesian_product{idx_indicies, idx_shape}) {
+            size_t i = static_cast<size_t>(idx[ls]);
+            array_t slice = update.index(ls);
+            updated_x.add_index({i}, slice);
+        }
+
+        return updated_x;
+    }
 
     jaxpr_tracer array_tracer_index::get() {
         auto& builder = idx.get_builder();
