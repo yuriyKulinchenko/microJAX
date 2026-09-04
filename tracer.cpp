@@ -602,27 +602,6 @@ namespace jax {
         return array_t{std::move(new_type), std::move(value_buffer)};
     }
 
-    // TODO: Make this generic over monoids
-    // TODO: rework how array slices work! way too much copying going on
-    array_t array_index::add(const array_t& update) {
-        // If x: [n, ms...], idx: [ls...], update: [ls..., ms...], then .op(): [n, ms...]
-        // Iterate through each idx, fetch an update slice, set the appropriate x.
-
-        auto& idx_shape = idx.get_type().get_shape();
-
-        std::vector<size_t> idx_indicies (idx_shape.size(), 0);
-
-        array_t updated_x {x};
-
-        for (auto& ls: cartesian_product{idx_indicies, idx_shape}) {
-            size_t i = static_cast<size_t>(idx[ls]);
-            array_t slice = update.index(ls);
-            updated_x.add_index({i}, slice);
-        }
-
-        return updated_x;
-    }
-
     jaxpr_tracer array_tracer_index::get() {
         auto& builder = idx.get_builder();
         return emit_gather(builder, array_value(x, builder), value{idx.get_var()});

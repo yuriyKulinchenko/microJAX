@@ -459,7 +459,7 @@ namespace jax {
     template<size_t N>
     jaxpr_tracer tracer_concatenate(jaxpr_builder& builder, std::array<value, N> values, size_t axis) {
         // Dimensions have to match:
-        std::vector<size_t>& first_shape = values[0].get_shape();
+        const std::vector<size_t>& first_shape = values[0].get_shape();
         dtype_t dtype = values[0].get_dtype();
         size_t rank = first_shape.size();
         size_t concat_size = first_shape[axis];

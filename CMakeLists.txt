@@ -29,6 +29,8 @@ add_executable(microJAX main.cpp
         jax_format.h
         jax_vm.h
         jax_vm.cpp
+        jax_array.cpp
+        jax_array.h
 )
 
 add_executable(microJAX_tests gtest_test.cpp
@@ -38,6 +40,7 @@ add_executable(microJAX_tests gtest_test.cpp
         grad.cpp
         DCE_class.cpp
         jax_vm.cpp
+        jax_array.cpp
 )
 
 target_link_libraries(microJAX_tests GTest::gtest_main)

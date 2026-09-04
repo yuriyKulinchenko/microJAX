@@ -348,6 +348,18 @@ inline std::vector<size_t> deduced_shape(std::span<const size_t> shape, size_t t
     return new_shape;
 }
 
+inline size_t flatten_index(std::span<const size_t> stride,std::span<const size_t> indices) {
+    size_t idx = 0;
+    for (size_t axis = 0; axis < indices.size(); axis++) {
+        idx += indices[axis] * stride[axis];
+    }
+    return idx;
+}
 
+static double epsilon = 1. / static_cast<double>(1 << 10);
+
+static bool double_eq(double x, double y) {
+    return std::abs(x - y) < epsilon;
+}
 
 #endif //HELPER_H
