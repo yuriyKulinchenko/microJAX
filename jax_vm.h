@@ -36,29 +36,29 @@ private:
 
     static void check_fixed_arity(const equation& eq, size_t input_arity, size_t output_arity=1);
 
-    template<array_t (array_t::*op)() const>
+    template<array_t(*UnaryOp)(const array_t&)>
     void execute_unary_op(const equation& eq) {
         check_fixed_arity(eq, 1);
         if (eq.get_input(0).get_dtype() == dtype_t::BOOL) {
             throw std::logic_error("Error: cannot execute unary op on boolean argument");
         }
-        emplace_variable(eq.get_output(0), (get_input(eq, 0).*op)());
+        emplace_variable(eq.get_output(0), UnaryOp(get_input(eq, 0)));
     }
 
-    template<array_t (array_t::*op)(const array_t&) const>
+    template<array_t(*BinaryOp)(const array_t&, const array_t&)>
     void execute_binary_op(const equation& eq) {
         if (eq.get_input(0).get_dtype() != eq.get_input(1).get_dtype()) {
             throw std::logic_error("Error: can only execute binary op on arguments of the same type");
         }
 
         check_fixed_arity(eq, 2);
-        emplace_variable(eq.get_output(0), (get_input(eq, 0).*op)(get_input(eq, 1)));
+        emplace_variable(eq.get_output(0), BinaryOp(get_input(eq, 0), get_input(eq, 1)));
     }
 
-    template<array_t (array_t::*op)(const array_t&) const>
+    template<array_t(*BinaryOp)(const array_t&, const array_t&)>
     void execute_binary_comparison_op(const equation& eq) {
         check_fixed_arity(eq, 2);
-        emplace_variable(eq.get_output(0), (get_input(eq, 0).*op)(get_input(eq, 1)));
+        emplace_variable(eq.get_output(0), BinaryOp(get_input(eq, 0), get_input(eq, 1)));
     }
 
     const expression& jaxpr;

@@ -6,11 +6,49 @@
 
 std::ostream& operator<<(std::ostream& stream, const jax::type_t& type);
 std::ostream& operator<<(std::ostream& stream, const jax::var_t& var);
-std::ostream& operator<<(std::ostream& stream, const jax::array_t& array);
 std::ostream& operator<<(std::ostream& stream, const jax::literal_t& literal);
 
+// Emits the array (or any array_like, e.g. array_span_t) in nested-bracket form.
+template<jax::array_like A>
+std::ostream& operator<<(std::ostream& stream, const A& array) {
+    const auto& shape = array.get_type().get_shape();
+    const auto& flat_vector = array.get_value();
+
+    auto index_vector = std::vector<size_t>(shape.size(), 0);
+    size_t remaining_open_brackets = shape.size();
+
+    for (double element: flat_vector) {
+        // Emit sequence of [[[...
+        while (remaining_open_brackets > 0) {
+            stream << '[';
+            remaining_open_brackets--;
+        }
+
+        stream << element;
+
+        // Emit sequence of ]]]...
+        for (size_t j = index_vector.size(); j--> 0;) {
+            if (index_vector[j] < shape[j] - 1) {
+                index_vector[j]++;
+                stream << ", ";
+                break;
+            }
+
+            index_vector[j] = 0;
+            stream << ']';
+            remaining_open_brackets++;
+        }
+    }
+    return stream;
+}
+
 std::ostream& emit_typed_var(std::ostream& stream, const jax::var_t& var);
-std::ostream& emit_typed_array(std::ostream& stream, const jax::array_t& array);
+
+template<jax::array_like A>
+std::ostream& emit_typed_array(std::ostream& stream, const A& array) {
+    return stream << array << ':' << array.get_type();
+}
+
 std::ostream& emit_typed_literal(std::ostream& stream, const jax::literal_t& literal);
 
 std::ostream& emit_value_vector(std::ostream& stream,

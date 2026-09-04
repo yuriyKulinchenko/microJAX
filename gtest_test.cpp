@@ -104,7 +104,7 @@ TEST(grad_closed_form, linear) {
     array_t expected_derivative {100}; // f32
 
     expression derivate_jaxpr {grad(get_jaxpr(
-        [](jaxpr_tracer x) -> jaxpr_tracer {
+        [](const jaxpr_tracer& x) -> jaxpr_tracer {
             return 100 * x + 12;
     }, type_t{F32}))};
 

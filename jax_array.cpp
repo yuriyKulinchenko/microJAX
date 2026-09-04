@@ -437,6 +437,14 @@ namespace jax {
         return const_array_span_t{*this, indices};
     }
 
+    mutable_array_span_t array_t::index(size_t i) {
+        return mutable_array_span_t{*this, std::span{&i, 1}};
+    }
+
+    const_array_span_t array_t::index(size_t i) const {
+        return const_array_span_t{*this, std::span{&i, 1}};
+    }
+
     dtype_t type_span::get_dtype() const {
         return dtype;
     }
@@ -521,6 +529,11 @@ namespace jax {
     }
 
     template<bool Const>
+    array_span_t<Const> array_span_t<Const>::index(size_t i) const {
+        return index(std::span{&i, 1});
+    }
+
+    template<bool Const>
     const type_span& array_span_t<Const>::get_type() const {
         return type;
     }
@@ -572,8 +585,8 @@ namespace jax {
     const std::vector<size_t> &literal_t::get_shape() {
         return shape;
     }
-    std::vector<size_t> get_implicit_broadcast_shape(const std::vector<size_t>& left_shape,
-        const std::vector<size_t>& right_shape) {
+    std::vector<size_t> get_implicit_broadcast_shape(std::span<const size_t> left_shape,
+        std::span<const size_t> right_shape) {
 
         // Normalize so that left_shape.size() < right_shape.size():
         if (right_shape.size() < left_shape.size())
@@ -600,8 +613,8 @@ namespace jax {
             } else if (left_shape[i] == right_shape[delta + i]) {
                 new_shape[delta + i] = left_shape[i];
             } else {
-                std::cerr << left_shape << '\n';
-                std::cerr << right_shape << '\n';
+                std::cerr << std::vector<size_t>(left_shape.begin(), left_shape.end()) << '\n';
+                std::cerr << std::vector<size_t>(right_shape.begin(), right_shape.end()) << '\n';
                 throw std::logic_error("Error: shape mismatch in implicit broadcast");
             }
         }
@@ -609,8 +622,8 @@ namespace jax {
         return new_shape;
     }
 
-    implicit_broadcast_result get_implicit_broadcast_result(const std::vector<size_t>& left_shape,
-        const std::vector<size_t>& right_shape) {
+    implicit_broadcast_result get_implicit_broadcast_result(std::span<const size_t> left_shape,
+        std::span<const size_t> right_shape) {
         std::vector<size_t> new_shape = get_implicit_broadcast_shape(left_shape, right_shape);
 
         std::vector<size_t> broadcast_dimensions(new_shape.size());

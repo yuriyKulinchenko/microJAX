@@ -105,9 +105,10 @@ namespace jax {
         std::span<const size_t> right_shape);
 
     template<typename A>
-    concept array_like = requires(const A a, std::span<const size_t> indices)
+    concept array_like = requires(const A a, std::span<const size_t> indices, size_t i)
     {
         {a.index(indices)};
+        {a.index(i)};
         {a.get_type()};
         {a.get_value()} -> std::convertible_to<std::span<const double>>;
         {a[indices]} -> std::convertible_to<double>;
@@ -179,6 +180,9 @@ namespace jax {
         [[nodiscard]] mutable_array_span_t index(std::span<const size_t> indices);
         [[nodiscard]] const_array_span_t index(std::span<const size_t> indices) const;
 
+        [[nodiscard]] mutable_array_span_t index(size_t i);
+        [[nodiscard]] const_array_span_t index(size_t i) const;
+
         [[nodiscard]] bool has_single_value(f64 val) const;
         [[nodiscard]] bool has_single_value() const;
         void compute_strides();
@@ -242,6 +246,7 @@ namespace jax {
 
         element_t& operator[](std::span<const size_t> indices) const;
         array_span_t index(std::span<const size_t> indices) const; // Preserves element_t
+        array_span_t index(size_t i) const;
 
         [[nodiscard]] const type_span& get_type() const;
         [[nodiscard]] std::span<element_t> get_value() const;
@@ -283,7 +288,7 @@ namespace jax {
             } else if constexpr(i < num_consts + num_carry) {
                 return std::move(carry[i - num_consts]);
             } else {
-                return xs[i - num_consts - num_carry].index({t});
+                return xs[i - num_consts - num_carry].index(t);
             }
         };
 
@@ -482,10 +487,11 @@ namespace jax {
 
     // This assumes a matching dimension: no broadcast
     template<double(*BinaryOp)(double, double), array_like A, array_like B>
-    void array_binary_inplace_op(A& a, const B& b) {
+    A& array_binary_inplace_op(A& a, const B& b) {
         for (auto&& [x, y]: std::views::zip(a.get_value(), b.get_value())) {
             x = BinaryOp(x, y);
         }
+        return a;
     }
 
     template<double(*BinaryOp)(double, double), array_like A>
@@ -502,7 +508,7 @@ namespace jax {
         for (auto& ls: cartesian_product{idx_indicies, idx_shape}) {
             size_t i = static_cast<size_t>(idx[ls]);
             auto update_slice = update.index(ls);
-            auto dest_slice = updated_x.index(std::span{&i, 1});
+            auto dest_slice = updated_x.index(i);
 
             array_binary_inplace_op<BinaryOp>(dest_slice, update_slice);
         }
@@ -524,11 +530,15 @@ namespace jax {
 
 #undef ELEMENTWISE_UNARY_OP
 
-#define ELEMENTWISE_BINARY_OP(op_name, return_expr)                                                 \
-    template<array_like A, array_like B>                                                            \
-    array_t op_name(const A& a, const B& b) {                                                       \
-        return array_binary_elementwise_op<[](double x, double y){return (return_expr);}>(a, b);    \
-    }
+#define ELEMENTWISE_BINARY_OP(op_name, return_expr)                                                         \
+    template<array_like A, array_like B>                                                                    \
+    array_t op_name(const A& a, const B& b) {                                                               \
+        return array_binary_elementwise_op<[](double x, double y) -> double {return (return_expr);}>(a, b); \
+    }                                                                                                       \
+    template<array_like A>                                                                                  \
+    array_t op_name(const A& a, double b) { return op_name(a, array_t{b}); }                                \
+    template<array_like B>                                                                                  \
+    array_t op_name(double a, const B& b) { return op_name(array_t{a}, b); }
 
     ELEMENTWISE_BINARY_OP(operator+, x + y);
     ELEMENTWISE_BINARY_OP(operator-, x - y);
@@ -560,6 +570,20 @@ namespace jax {
     ARRAY_INDEX_SCATTER_OP(min, std::min(x, y));
 
 #undef ARRAY_INDEX_SCATTER_OP
+
+
+#define ASSIGN_OP(op_name, return_expr)                                                         \
+    template<array_like A, array_like B>                                                        \
+    A&& op_name(A&& a, const B& b) {                                                            \
+        array_binary_inplace_op<[](double x, double y){return (return_expr);}>(a, b);           \
+        return std::forward<A>(a);                                                              \
+    }
+
+    ASSIGN_OP(operator+=, x + y);
+    ASSIGN_OP(operator-=, x - y);
+    ASSIGN_OP(operator*=, x * y);
+    ASSIGN_OP(operator/=, x / y);
+
 }
 
 

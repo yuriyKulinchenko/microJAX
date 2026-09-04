@@ -28,22 +28,26 @@ std::vector<array_t> jax_vm::run(const std::vector<array_t>& input) {
         switch (eq.get_op()) {
             using enum primitive_op;
 
-            case SIN: execute_unary_op<(&array_t::sin)>(eq); break;
-            case COS: execute_unary_op<(&array_t::cos)>(eq); break;
-            case EXP: execute_unary_op<(&array_t::exp)>(eq); break;
-            case LOG: execute_unary_op<(&array_t::log)>(eq); break;
-            case NEG: execute_unary_op<(&array_t::operator-)>(eq); break;
+            case SIN: execute_unary_op<[](const array_t& x) {return sin(x);}>(eq); break;
+            case COS: execute_unary_op<[](const array_t& x) {return cos(x);}>(eq); break;
+            case EXP: execute_unary_op<[](const array_t& x) {return exp(x);}>(eq); break;
+            case LOG: execute_unary_op<[](const array_t& x) {return log(x);}>(eq); break;
+            case NEG: execute_unary_op<[](const array_t& x) {return -x;}>(eq); break;
 
-            case ADD: execute_binary_op<(&array_t::operator+)>(eq); break;
-            case SUB: execute_binary_op<(&array_t::operator-)>(eq); break;
-            case MUL: execute_binary_op<(&array_t::operator*)>(eq); break;
-            case DIV: execute_binary_op<(&array_t::operator/)>(eq); break;
-            case LT: execute_binary_comparison_op<(&array_t::operator<)>(eq); break;
-            case LE: execute_binary_comparison_op<(&array_t::operator<=)>(eq); break;
-            case GT: execute_binary_comparison_op<(&array_t::operator>)>(eq); break;
-            case GE: execute_binary_comparison_op<(&array_t::operator>=)>(eq); break;
-            case EQ: execute_binary_comparison_op<(&array_t::elementwise_equal)>(eq); break;
-            case NE: execute_binary_comparison_op<(&array_t::elementwise_not_equal)>(eq); break;
+            case ADD: execute_binary_op<([](const array_t& x, const array_t& y) {return x + y;})>(eq); break;
+            case SUB: execute_binary_op<([](const array_t& x, const array_t& y) {return x - y;})>(eq); break;
+            case MUL: execute_binary_op<([](const array_t& x, const array_t& y) {return x * y;})>(eq); break;
+            case DIV: execute_binary_op<([](const array_t& x, const array_t& y) {return x / y;})>(eq); break;
+
+            case LT: execute_binary_comparison_op<[](const array_t& x, const array_t& y) {return x < y;}>(eq); break;
+            case LE: execute_binary_comparison_op<[](const array_t& x, const array_t& y) {return x <= y;}>(eq); break;
+            case GT: execute_binary_comparison_op<[](const array_t& x, const array_t& y) {return x > y;}>(eq); break;
+            case GE: execute_binary_comparison_op<[](const array_t& x, const array_t& y) {return x >= y;}>(eq); break;
+
+            case EQ: execute_binary_comparison_op<[](const array_t& x, const array_t& y)
+            {return elementwise_equal(x, y);}>(eq); break;
+            case NE: execute_binary_comparison_op<[](const array_t& x, const array_t& y)
+            {return elementwise_not_equal(x, y);}>(eq); break;
 
             case DOT_GENERAL: {
                 check_fixed_arity(eq, 2);
@@ -195,8 +199,8 @@ std::vector<array_t> jax_vm::run(const std::vector<array_t>& input) {
                     return get_input(eq, params.num_consts + carry_index);
                 };
 
-                auto get_xs_slice = [&](const size_t x_index, const size_t slice_index) -> array_t {
-                    return get_input(eq, params.num_consts + params.num_carry + x_index).index({slice_index});
+                auto get_xs_slice = [&](const size_t x_index, const size_t slice_index) -> const_array_span_t {
+                    return get_input(eq, params.num_consts + params.num_carry + x_index).index(slice_index);
                 };
 
                 auto update_carry = [&](std::vector<array_t>& inputs, const std::span<array_t> carries) -> void {
@@ -208,7 +212,7 @@ std::vector<array_t> jax_vm::run(const std::vector<array_t>& input) {
                 // Simultaneous update of multiple ys, across multiple slices:
                 auto update_ys = [&](const size_t slice_index, std::span<array_t> ys_slices) -> void {
                     for (size_t i = 0; i < ys_slices.size(); i++) {
-                        Y[i].add_index({slice_index}, ys_slices[i]);
+                        Y[i].index(slice_index) += ys_slices[i];
                     }
                 };
 
