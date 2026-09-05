@@ -670,8 +670,8 @@ namespace jax {
 
         std::vector<size_t> scratch_indices (x_shape.size(), 0);
         auto reverse_projection = [&](const std::vector<size_t>& is) -> const std::vector<size_t>& {
-            for (size_t i = 0; i < is.size(); i++) {
-                scratch_indices[i] = start_indices[i] + is[i] * strides[i];
+            for (size_t d = 0; d < is.size(); d++) {
+                scratch_indices[d] = start_indices[d] + is[d] * strides[d];
             }
             return scratch_indices;
         };
@@ -680,11 +680,39 @@ namespace jax {
         value_buffer.reserve(num_elements(new_shape));
 
         std::vector<size_t> new_indices (new_shape.size(), 0);
-
         for (auto& is: cartesian_product {new_indices, new_shape}) {
             value_buffer.push_back(x[reverse_projection(is)]);
         }
 
         return array_t {std::move(new_type), std::move(value_buffer)};
+    }
+
+    array_t pad(const array_t& x,
+        const array_t& padding_value,
+        const std::vector<std::array<size_t, 3>>& padding_config) {
+
+        auto& x_shape = x.get_type().get_shape();
+
+        std::vector new_shape {pad_shape(x_shape, padding_config)};
+        type_t new_type {x.get_type().get_dtype(), new_shape};
+
+        double y = padding_value[std::span<size_t>{}];
+        array_t padded_array {std::move(new_type), std::vector(num_elements(new_shape), y)};
+
+        std::vector<size_t> scratch_indices (new_shape.size(), 0);
+        auto project = [&](const std::vector<size_t>& is) -> const std::vector<size_t>& {
+            for (size_t d = 0; d < is.size(); d++) {
+                auto [low, _, interior] = padding_config[d];
+                scratch_indices[d] = low + is[d] * (interior + 1);
+            }
+            return scratch_indices;
+        };
+
+        std::vector<size_t> x_indices (x_shape.size(), 0);
+        for (auto& is: cartesian_product{x_indices, x_shape}) {
+            padded_array[project(is)] = x[is];
+        }
+
+        return padded_array;
     }
 }

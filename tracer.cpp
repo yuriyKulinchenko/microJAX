@@ -526,7 +526,7 @@ static jaxpr_tracer emit_scatter(jaxpr_builder& builder, value x_val, value idx_
     return {builder, std::move(new_var)};
 }
 
-value jaxpr_tracer_index::get_idx_value() {
+value jaxpr_tracer_index::get_idx_value() const {
     if (std::holds_alternative<jaxpr_tracer>(idx)) {
         return value{std::get<jaxpr_tracer>(idx).get_var()};
     }
@@ -745,5 +745,61 @@ namespace jax {
         );
 
         return jaxpr_tracer {builder, std::move(sliced_var)};
+    }
+
+    jaxpr_tracer pad(jaxpr_builder& builder,
+        const value& x,
+        const value& padding_value,
+        std::vector<std::array<size_t, 3>> padding_config) {
+
+        if (padding_value.get_shape().size() != 0) {
+            throw std::logic_error("Error: padding_value must be a scalar");
+        }
+
+        std::vector new_shape {pad_shape(x.get_type().get_shape(), padding_config)};
+        type_t new_type {x.get_type().get_dtype(), std::move(new_shape)};
+
+        var_t padded_var = builder.jaxpr.fresh_var(std::move(new_type));
+
+        builder.jaxpr.equations.emplace_back(
+            std::vector{x, padding_value},
+            std::vector{padded_var},
+            primitive_op::PAD,
+            pad_params {
+                .padding_config = std::move(padding_config)
+            }
+        );
+
+        return jaxpr_tracer{builder, std::move(padded_var)};
+    }
+
+
+    jaxpr_tracer pad(const jaxpr_tracer& x,
+        const jaxpr_tracer& padding_value,
+        std::vector<std::array<size_t, 3>> padding_config) {
+        return pad(x.get_builder(),
+            value{x.get_var()},
+            value{padding_value.get_var()},
+            std::move(padding_config));
+    }
+
+    jaxpr_tracer pad(const array_t& x,
+        const jaxpr_tracer& padding_value,
+        std::vector<std::array<size_t, 3>> padding_config) {
+        auto& builder = padding_value.get_builder();
+        return pad(builder,
+            array_value(x, builder),
+            value{padding_value.get_var()},
+            std::move(padding_config));
+    }
+
+    jaxpr_tracer pad(const jaxpr_tracer& x,
+        const array_t& padding_value,
+        std::vector<std::array<size_t, 3>> padding_config) {
+        auto& builder = x.get_builder();
+        return pad(builder,
+            value{x.get_var()},
+            array_value(padding_value, builder),
+            std::move(padding_config));
     }
 }

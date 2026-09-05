@@ -23,8 +23,8 @@ MAX, MIN
 INTEGER_POW
 POW
 CONCATENATE // Done
-SLICE
-PAD
+SLICE // Done
+PAD // Done
 */
 
 class jaxpr_tracer;

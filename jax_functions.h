@@ -243,6 +243,22 @@ namespace jax {
         std::vector<size_t> start_indices,
         std::vector<size_t> limit_indices,
         std::vector<size_t> strides);
+
+    jaxpr_tracer pad(const jaxpr_tracer& x,
+        const jaxpr_tracer& padding_value,
+        std::vector<std::array<size_t, 3>> padding_config);
+
+    jaxpr_tracer pad(const jaxpr_tracer& x,
+        const array_t& padding_value,
+        std::vector<std::array<size_t, 3>> padding_config);
+
+    jaxpr_tracer pad(const array_t& x,
+        const jaxpr_tracer& padding_value,
+        std::vector<std::array<size_t, 3>> padding_config);
+
+    array_t pad(const array_t& x,
+        const array_t& padding_value,
+        const std::vector<std::array<size_t, 3>>& padding_config);
 }
 
 

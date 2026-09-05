@@ -151,7 +151,7 @@ public:
     jaxpr_tracer min(const jax::array_t& update);
 private:
 
-    jax::value get_idx_value();
+    jax::value get_idx_value() const;
     jaxpr_tracer op(jax::value update, jax::primitive_op scatter_op);
 
     jaxpr_tracer x;

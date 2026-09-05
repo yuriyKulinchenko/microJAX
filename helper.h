@@ -382,6 +382,26 @@ inline std::vector<size_t> slice_shape(
     return new_shape;
 }
 
+inline std::vector<size_t> pad_shape(
+    std::span<const size_t> x_shape,
+    std::span<const std::array< size_t, 3>> padding_config) {
+    using namespace std::views;
+
+    if (x_shape.size() != padding_config.size()) {
+        throw std::logic_error("Error: invalid padding config");
+    }
+
+    std::vector<size_t> new_shape {};
+    new_shape.reserve(x_shape.size());
+
+    for (auto [dim_size, config]: zip(x_shape, padding_config)) {
+        auto [low, high, interior] = config;
+        new_shape.push_back(low + high + dim_size + (dim_size - 1) * interior);
+    }
+
+    return new_shape;
+}
+
 static double epsilon = 1. / static_cast<double>(1 << 10);
 
 static bool double_eq(double x, double y) {
