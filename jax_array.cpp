@@ -656,4 +656,35 @@ namespace jax {
             std::move(right_broadcast_dimensions)
         };
     }
+
+    array_t slice(const array_t& x,
+        std::vector<size_t> start_indices,
+        std::vector<size_t> limit_indices,
+        std::vector<size_t> strides) {
+        // Here, don't perform checks.
+
+        auto& x_shape = x.get_type().get_shape();
+
+        std::vector new_shape {slice_shape(x_shape, start_indices, limit_indices, strides)};
+        type_t new_type {x.get_type().get_dtype(), new_shape};
+
+        std::vector<size_t> scratch_indices (x_shape.size(), 0);
+        auto reverse_projection = [&](const std::vector<size_t>& is) -> const std::vector<size_t>& {
+            for (size_t i = 0; i < is.size(); i++) {
+                scratch_indices[i] = start_indices[i] + is[i] * strides[i];
+            }
+            return scratch_indices;
+        };
+
+        std::vector<double> value_buffer {};
+        value_buffer.reserve(num_elements(new_shape));
+
+        std::vector<size_t> new_indices (new_shape.size(), 0);
+
+        for (auto& is: cartesian_product {new_indices, new_shape}) {
+            value_buffer.push_back(x[reverse_projection(is)]);
+        }
+
+        return array_t {std::move(new_type), std::move(value_buffer)};
+    }
 }

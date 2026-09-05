@@ -356,6 +356,32 @@ inline size_t flatten_index(std::span<const size_t> stride,std::span<const size_
     return idx;
 }
 
+inline std::vector<size_t> slice_shape(
+    std::span<const size_t> x_shape,
+    std::span<const size_t> start_indices,
+    std::span<const size_t> limit_indices,
+    std::span<const size_t> strides) {
+
+    using namespace std::views;
+
+    auto out_of_bounds = [](size_t i, size_t dim_size) -> bool {
+        return i < 0 || i >= dim_size;
+    };
+
+    std::vector<size_t> new_shape {};
+    new_shape.reserve(x_shape.size());
+
+    for (auto [dim_size, start, limit, stride]: zip(x_shape, start_indices, limit_indices, strides)) {
+        if (out_of_bounds(start, dim_size) || out_of_bounds(limit - 1, dim_size)) {
+            std::cerr << dim_size << ", " << start << ", " << limit << ", " << stride;
+            throw std::logic_error("Error: invalid 'start' or 'limit' params");
+        }
+        new_shape.push_back((limit - start + stride - 1) / stride);
+    }
+
+    return new_shape;
+}
+
 static double epsilon = 1. / static_cast<double>(1 << 10);
 
 static bool double_eq(double x, double y) {

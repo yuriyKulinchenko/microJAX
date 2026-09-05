@@ -24,10 +24,25 @@ void select_example();
 void gather_example();
 void scatter_gather_example();
 void concatenate_example();
+void slice_example();
 
 int main() {
-    concatenate_example();
+    slice_example();
     return 0;
+}
+
+void slice_example() {
+    using namespace jax;
+    using enum dtype_t;
+
+    jaxpr_builder builder {};
+
+    auto x = builder.register_tracer(F32, 100, 32, 50);
+
+    builder.register_output(slice(x, {0, 0, 0}, {100, 10, 50}, {1, 1, 2}));
+
+    auto jaxpr = builder.get_jaxpr();
+    std::cout << "Original expression:\n" << jaxpr;
 }
 
 void concatenate_example() {

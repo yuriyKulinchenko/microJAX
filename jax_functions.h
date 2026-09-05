@@ -232,8 +232,17 @@ namespace jax {
 
             return array_concatenate(std::move(processed_value_array), axis);
         }
-
     }
+
+    jaxpr_tracer slice(const jaxpr_tracer& x,
+        std::vector<size_t> start_indices,
+        std::vector<size_t> limit_indices,
+        std::vector<size_t> strides);
+
+    array_t slice(const array_t& x,
+        std::vector<size_t> start_indices,
+        std::vector<size_t> limit_indices,
+        std::vector<size_t> strides);
 }
 
 

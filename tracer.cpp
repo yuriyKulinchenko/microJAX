@@ -1,6 +1,7 @@
 #include <optional>
 #include <unordered_set>
 #include "tracer.h"
+#include "jax_functions.h"
 
 using namespace jax;
 
@@ -709,4 +710,40 @@ jaxpr_tracer jaxpr_builder::ones(size_t shape, dtype_t dtype) {
 
 expression&& jaxpr_builder::get_jaxpr() {
     return std::move(jaxpr);
+}
+
+namespace jax {
+    jaxpr_tracer slice(const jaxpr_tracer& x,
+        std::vector<size_t> start_indices,
+        std::vector<size_t> limit_indices,
+        std::vector<size_t> strides) {
+        using namespace std::views;
+
+        auto& x_shape = x.get_type().get_shape();
+        size_t rank = x_shape.size();
+
+        if (start_indices.size() != rank || limit_indices.size() != rank || strides.size() != rank) {
+            throw std::logic_error(
+                "Error: size of start_indices, limit_indices and strides must all be the same rank as x");
+        }
+
+        std::vector new_shape {slice_shape(x_shape, start_indices, limit_indices, strides)};
+        type_t new_type {x.get_type().get_dtype(), std::move(new_shape)};
+
+        auto& builder = x.get_builder();
+        var_t sliced_var = builder.jaxpr.fresh_var(std::move(new_type));
+
+        builder.jaxpr.equations.emplace_back(
+            std::vector{value{x.get_var()}},
+            std::vector{sliced_var},
+            primitive_op::SLICE,
+            slice_params {
+                .start_indices = std::move(start_indices),
+                .limit_indices = std::move(limit_indices),
+                .strides = std::move(strides)
+            }
+        );
+
+        return jaxpr_tracer {builder, std::move(sliced_var)};
+    }
 }
