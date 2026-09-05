@@ -319,6 +319,12 @@ void grad_class::propagate_adjoints(equation& eq) {
             break;
         }
 
+        case SQRT: break;
+        case RSQRT: break;
+        case TANH: break;
+        case LOGISTIC: break;
+        case INTEGER_POW: break;
+
         case ADD: {
             // z = x + y
             // x' += dL/dz dz/dx
@@ -439,6 +445,10 @@ void grad_class::propagate_adjoints(equation& eq) {
 
             break;
         }
+
+        case MAX: break;
+        case MIN: break;
+        case POW: break;
 
         case REDUCE_SUM: {
             auto& output_var = eq.get_output(0);
@@ -1064,6 +1074,19 @@ void grad_class::propagate_adjoints(equation& eq) {
 
             break;
         }
+
+        case REDUCE_MAX: break;
+        case REDUCE_MIN: break;
+        case RESHAPE: break;
+        case GATHER: break;
+        case SCATTER_ADD: break;
+        case SCATTER_MUL: break;
+        case SCATTER_MAX: break;
+        case SCATTER_MIN: break;
+        case SCATTER: break;
+        case CONCATENATE: break;
+        case SLICE: break;
+        case PAD: break;
 
         case EQ:
         case NE:

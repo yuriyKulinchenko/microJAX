@@ -557,11 +557,11 @@ INDEX_OP(jaxpr_tracer_index, x.get_builder(), min, primitive_op::SCATTER_MIN)
 
 namespace jax {
 
-    array_tracer_index array_t::at(jaxpr_tracer idx) {
+    array_tracer_index array_t::at(jaxpr_tracer idx) const {
         return array_tracer_index{*this, std::move(idx)};
     }
 
-    array_index array_t::at(array_t idx) {
+    array_index array_t::at(array_t idx) const {
         return array_index{*this, std::move(idx)};
     }
 

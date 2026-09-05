@@ -4,6 +4,7 @@
 
 #include "jax_vm.h"
 #include "helper.h"
+#include "jax_functions.h"
 
 jax_vm::jax_vm(const expression& jaxpr):
 jaxpr(jaxpr),
@@ -33,11 +34,18 @@ std::vector<array_t> jax_vm::run(const std::vector<array_t>& input) {
             case EXP: execute_unary_op<[](const array_t& x) {return exp(x);}>(eq); break;
             case LOG: execute_unary_op<[](const array_t& x) {return log(x);}>(eq); break;
             case NEG: execute_unary_op<[](const array_t& x) {return -x;}>(eq); break;
+            case SQRT: execute_unary_op<[](const array_t& x) {return sqrt(x);}>(eq); break;
+            case RSQRT: execute_unary_op<[](const array_t& x) {return rsqrt(x);}>(eq); break;
+            case TANH: execute_unary_op<[](const array_t& x) {return tanh(x);}>(eq); break;
+            case LOGISTIC: execute_unary_op<[](const array_t& x) {return logistic(x);}>(eq); break;
 
             case ADD: execute_binary_op<([](const array_t& x, const array_t& y) {return x + y;})>(eq); break;
             case SUB: execute_binary_op<([](const array_t& x, const array_t& y) {return x - y;})>(eq); break;
             case MUL: execute_binary_op<([](const array_t& x, const array_t& y) {return x * y;})>(eq); break;
             case DIV: execute_binary_op<([](const array_t& x, const array_t& y) {return x / y;})>(eq); break;
+            case MAX: execute_binary_op<[](const array_t& x, const array_t& y) {return max(x, y);}>(eq); break;
+            case MIN: execute_binary_op<[](const array_t& x, const array_t& y) {return min(x, y);}>(eq); break;
+            case POW: execute_binary_op<[](const array_t& x, const array_t& y) {return pow(x, y);}>(eq); break;
 
             case LT: execute_binary_comparison_op<[](const array_t& x, const array_t& y) {return x < y;}>(eq); break;
             case LE: execute_binary_comparison_op<[](const array_t& x, const array_t& y) {return x <= y;}>(eq); break;
@@ -54,13 +62,6 @@ std::vector<array_t> jax_vm::run(const std::vector<array_t>& input) {
                 auto& [l_c, r_c, l_b, r_b] = std::get<dot_general_params>(eq.get_params());
                 emplace_variable(eq.get_output(0),
                     get_input(eq, 0).dot_general(get_input(eq, 1), l_c, r_c, l_b, r_b));
-                break;
-            }
-
-            case REDUCE_SUM: {
-                check_fixed_arity(eq, 1);
-                auto& axes = std::get<reduce_sum_params>(eq.get_params()).axes;
-                emplace_variable(eq.get_output(0), get_input(eq, 0).reduce_sum(axes));
                 break;
             }
 
@@ -83,6 +84,145 @@ std::vector<array_t> jax_vm::run(const std::vector<array_t>& input) {
                 check_fixed_arity(eq, 1);
                 dtype_t new_dtype = std::get<convert_element_type_params>(eq.get_params()).new_dtype;
                 emplace_variable(eq.get_output(0), get_input(eq, 0).convert_element_type(new_dtype));
+                break;
+            }
+
+            case INTEGER_POW: {
+                check_fixed_arity(eq, 1);
+                size_t y = std::get<integer_pow_params>(eq.get_params()).y;
+                emplace_variable(eq.get_output(0), integer_pow(get_input(eq, 0), y));
+                break;
+            }
+
+            case REDUCE_SUM: {
+                check_fixed_arity(eq, 1);
+                auto& axes = std::get<reduce_sum_params>(eq.get_params()).axes;
+                emplace_variable(eq.get_output(0), get_input(eq, 0).reduce_sum(axes));
+                break;
+            }
+
+            case REDUCE_MAX: {
+                check_fixed_arity(eq, 1);
+                auto& axes = std::get<reduce_max_params>(eq.get_params()).axes;
+                emplace_variable(eq.get_output(0), get_input(eq, 0).reduce_max(axes));
+                break;
+            }
+
+            case REDUCE_MIN: {
+                check_fixed_arity(eq, 1);
+                auto& axes = std::get<reduce_min_params>(eq.get_params()).axes;
+                emplace_variable(eq.get_output(0), get_input(eq, 0).reduce_min(axes));
+                break;
+            }
+
+            case RESHAPE: {
+                check_fixed_arity(eq, 1);
+                auto& new_sizes = std::get<reshape_params>(eq.get_params()).new_sizes;
+                emplace_variable(eq.get_output(0), get_input(eq, 0).reshape(new_sizes));
+                break;
+            }
+
+            case GATHER: {
+                check_fixed_arity(eq, 2);
+                emplace_variable(eq.get_output(0),
+                    get_input(eq, 0).at(get_input(eq, 1)).get());
+                break;
+            }
+
+            case SCATTER_ADD: {
+                check_fixed_arity(eq, 3);
+                emplace_variable(eq.get_output(0),
+                    get_input(eq, 0).at(get_input(eq, 1)).add(get_input(eq, 2)));
+                break;
+            }
+
+            case SCATTER_MUL: {
+                check_fixed_arity(eq, 3);
+                emplace_variable(eq.get_output(0),
+                    get_input(eq, 0).at(get_input(eq, 1)).multiply(get_input(eq, 2)));
+                break;
+            }
+
+            case SCATTER_MAX: {
+                check_fixed_arity(eq, 3);
+                emplace_variable(eq.get_output(0),
+                    get_input(eq, 0).at(get_input(eq, 1)).max(get_input(eq, 2)));
+                break;
+            }
+
+            case SCATTER_MIN: {
+                check_fixed_arity(eq, 3);
+                emplace_variable(eq.get_output(0),
+                    get_input(eq, 0).at(get_input(eq, 1)).min(get_input(eq, 2)));
+                break;
+            }
+
+            case SCATTER: {
+                check_fixed_arity(eq, 3);
+                emplace_variable(eq.get_output(0),
+                    get_input(eq, 0).at(get_input(eq, 1)).set(get_input(eq, 2)));
+                break;
+            }
+
+            case SLICE: {
+                check_fixed_arity(eq, 1);
+                auto& [start_indices, limit_indices, strides] = std::get<slice_params>(eq.get_params());
+                emplace_variable(eq.get_output(0),
+                    slice(get_input(eq, 0), start_indices, limit_indices, strides));
+                break;
+            }
+
+            case PAD: {
+                check_fixed_arity(eq, 2);
+                auto& padding_config = std::get<pad_params>(eq.get_params()).padding_config;
+                emplace_variable(eq.get_output(0),
+                    pad(get_input(eq, 0), get_input(eq, 1), padding_config));
+                break;
+            }
+
+            case CONCATENATE: {
+                size_t axis = std::get<concatenate_params>(eq.get_params()).dimension;
+                const size_t num_tensors = eq.get_input().size();
+
+                const std::vector<size_t>& first_shape = get_input(eq, 0).get_type().get_shape();
+                size_t rank = first_shape.size();
+
+                size_t concat_size = 0;
+                for (size_t t = 0; t < num_tensors; t++) {
+                    concat_size += get_input(eq, t).get_type().get_shape()[axis];
+                }
+
+                std::vector new_shape {first_shape};
+                new_shape[axis] = concat_size;
+                array_t result {type_t{get_input(eq, 0).get_type().get_dtype(), new_shape},
+                    std::vector<double>(num_elements(new_shape), 0)};
+
+                size_t concatenate_dimension_offset = 0;
+                for (size_t t = 0; t < num_tensors; t++) {
+                    const array_t& tensor = get_input(eq, t);
+                    const std::vector<size_t>& source_shape = tensor.get_type().get_shape();
+                    std::vector<size_t> indicies (rank, 0);
+                    for (auto& is: cartesian_product{indicies, source_shape}) {
+                        double value = tensor[is];
+                        indicies[axis] += concatenate_dimension_offset;
+                        result[indicies] = value;
+                        indicies[axis] -= concatenate_dimension_offset;
+                    }
+                    concatenate_dimension_offset += source_shape[axis];
+                }
+
+                emplace_variable(eq.get_output(0), std::move(result));
+                break;
+            }
+
+            case SELECT: {
+                const array_t& pred = get_input(eq, 0);
+                array_t output = array_t::build_fill(get_input(eq, 1).get_type(), 0.);
+                for (size_t i = 0; i < output.get_value().size(); i++) {
+                    size_t index = static_cast<size_t>(pred.get_value()[i]);
+                    output.get_value()[i] = get_input(eq, 1 + index).get_value()[i];
+                }
+                emplace_variable(eq.get_output(0), std::move(output));
                 break;
             }
 
@@ -258,7 +398,7 @@ std::vector<array_t> jax_vm::run(const std::vector<array_t>& input) {
 
                 break;
             }
-
+            
             default: {
                 throw std::logic_error("Error: not implemented");
             }

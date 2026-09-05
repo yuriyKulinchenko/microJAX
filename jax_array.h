@@ -172,8 +172,8 @@ namespace jax {
 
         [[nodiscard]] std::optional<literal_t> get_literal() const;
 
-        [[nodiscard]] array_tracer_index at(jaxpr_tracer idx);
-        [[nodiscard]] array_index at(array_t idx);
+        [[nodiscard]] array_tracer_index at(jaxpr_tracer idx) const;
+        [[nodiscard]] array_index at(array_t idx) const;
 
         void set_type(type_t new_type);
 

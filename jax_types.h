@@ -1,31 +1,12 @@
 #ifndef JAXPR_TYPES_H
 #define JAXPR_TYPES_H
-#include <any>
-#include <functional>
+
 #include <string_view>
 #include <variant>
 #include <vector>
-#include <span>
 
 #include "helper.h"
 #include "jax_array.h"
-
-/*
-TODO:
-REDUCE_MAX, REDUCE_MIN // Done
-GATHER // Done
-SCATTER_ADD, SCATTER_MUL, SCATTER_MAX, SCATTER // Done
-RESHAPE // Done
-SQRT, RSQRT // Done
-TANH // Done
-LOGISTIC // Done
-MAX, MIN // Done
-INTEGER_POW // Done
-POW // Done
-CONCATENATE // Done
-SLICE // Done
-PAD // Done
-*/
 
 class jaxpr_tracer;
 class jaxpr_tracer_index;
