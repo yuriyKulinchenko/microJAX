@@ -538,16 +538,22 @@ namespace jax {
     ELEMENTWISE_UNARY_OP(log, std::log(x));
     ELEMENTWISE_UNARY_OP(operator-, -x);
 
+    ELEMENTWISE_UNARY_OP(sqrt, std::sqrt(x));
+    ELEMENTWISE_UNARY_OP(rsqrt, 1. / std::sqrt(x));
+    ELEMENTWISE_UNARY_OP(tanh, std::tanh(x));
+    ELEMENTWISE_UNARY_OP(logistic, 1. / (1. + std::exp(-x)));
+
 #undef ELEMENTWISE_UNARY_OP
 
-#define ELEMENTWISE_BINARY_OP_DTYPE(op_name, return_expr, out_dtype)                                                  \
-    template<array_like A, array_like B>                                                                              \
-    array_t op_name(const A& a, const B& b) {                                                                         \
-        return array_binary_elementwise_op<[](double x, double y) -> double {return (return_expr);}>(a, b, out_dtype);\
-    }                                                                                                                 \
-    template<array_like A>                                                                                            \
-    array_t op_name(const A& a, double b) { return op_name(a, array_t{b}); }                                          \
-    template<array_like B>                                                                                            \
+#define ELEMENTWISE_BINARY_OP_DTYPE(op_name, return_expr, out_dtype)            \
+    template<array_like A, array_like B>                                        \
+    array_t op_name(const A& a, const B& b) {                                   \
+        return array_binary_elementwise_op<[](double x, double y) -> double     \
+        {return (return_expr);}>(a, b, out_dtype);                              \
+    }                                                                           \
+    template<array_like A>                                                      \
+    array_t op_name(const A& a, double b) { return op_name(a, array_t{b}); }    \
+    template<array_like B>                                                      \
     array_t op_name(double a, const B& b) { return op_name(array_t{a}, b); }
 
     // Arithmetic keeps the promoted (resultant) dtype, comparisons yield BOOL.
@@ -568,10 +574,24 @@ namespace jax {
 
     ELEMENTWISE_BINARY_OP(min, std::min(x, y));
     ELEMENTWISE_BINARY_OP(max, std::max(x, y));
+    ELEMENTWISE_BINARY_OP(pow, std::pow(x, y));
 
 #undef ELEMENTWISE_COMPARISON_OP
 #undef ELEMENTWISE_BINARY_OP
 #undef ELEMENTWISE_BINARY_OP_DTYPE
+
+    // 'integer_pow' raises to a static, non-negative integer power (INTEGER_POW).
+    template<array_like A>
+    array_t integer_pow(const A& a, size_t y) {
+        std::span<const double> a_value = a.get_value();
+        std::vector<double> result_value(a_value.size());
+        for (size_t i = 0; i < a_value.size(); i++) {
+            double acc = 1;
+            for (size_t k = 0; k < y; k++) acc *= a_value[i];
+            result_value[i] = acc;
+        }
+        return array_t{a.get_type(), std::move(result_value)};
+    }
 
 #define ARRAY_INDEX_SCATTER_OP(op_name, return_expr)                                        \
     template<array_like A>                                                                  \

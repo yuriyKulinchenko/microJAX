@@ -802,4 +802,50 @@ namespace jax {
             array_value(padding_value, builder),
             std::move(padding_config));
     }
+
+#define UNARY_OP_TRACER(name, op_name)                                              \
+    jaxpr_tracer name(const jaxpr_tracer& x) {                                      \
+        return unary_op(value{x.get_var()}, op_name, x.get_builder());              \
+    }
+
+    UNARY_OP_TRACER(sqrt, primitive_op::SQRT)
+    UNARY_OP_TRACER(rsqrt, primitive_op::RSQRT)
+    UNARY_OP_TRACER(tanh, primitive_op::TANH)
+    UNARY_OP_TRACER(logistic, primitive_op::LOGISTIC)
+
+#undef UNARY_OP_TRACER
+
+    jaxpr_tracer integer_pow(const jaxpr_tracer& x, size_t y) {
+        return unary_op(value{x.get_var()}, x.get_type(), primitive_op::INTEGER_POW,
+            integer_pow_params{y}, x.get_builder());
+    }
+
+#define NAMED_BINARY_OP_TRACER(name, op_name, output_dtype)                                     \
+    jaxpr_tracer name(const jaxpr_tracer& t1, const jaxpr_tracer& t2) {                         \
+        dtype_t dtype = resultant_type(t1.get_type().get_dtype(), t2.get_type().get_dtype());   \
+        return elementwise_binary_op(                                                           \
+            promote(value{t1.get_var()}, dtype, t1.get_builder()),                              \
+            promote(value{t2.get_var()}, dtype, t1.get_builder()),                              \
+            op_name, t1.get_builder(), output_dtype);                                           \
+    }                                                                                           \
+    jaxpr_tracer name(const jaxpr_tracer& t1, const array_t& array) {                           \
+        dtype_t dtype = resultant_type(t1.get_type().get_dtype(), array.get_type().get_dtype());\
+        return elementwise_binary_op(                                                           \
+            promote(value{t1.get_var()}, dtype, t1.get_builder()),                              \
+            promote(array_value(array, t1.get_builder()), dtype, t1.get_builder()),             \
+            op_name, t1.get_builder(), output_dtype);                                           \
+    }                                                                                           \
+    jaxpr_tracer name(const array_t& array, const jaxpr_tracer& t1) {                           \
+        dtype_t dtype = resultant_type(t1.get_type().get_dtype(), array.get_type().get_dtype());\
+        return elementwise_binary_op(                                                           \
+            promote(array_value(array, t1.get_builder()), dtype, t1.get_builder()),             \
+            promote(value{t1.get_var()}, dtype, t1.get_builder()),                              \
+            op_name, t1.get_builder(), output_dtype);                                           \
+    }
+
+    NAMED_BINARY_OP_TRACER(max, primitive_op::MAX, std::nullopt)
+    NAMED_BINARY_OP_TRACER(min, primitive_op::MIN, std::nullopt)
+    NAMED_BINARY_OP_TRACER(pow, primitive_op::POW, std::nullopt)
+
+#undef NAMED_BINARY_OP_TRACER
 }

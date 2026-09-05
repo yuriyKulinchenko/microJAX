@@ -83,6 +83,20 @@ std::ostream& emit_equation(std::ostream& stream, const equation& eq, size_t tab
             break;
         }
 
+        case primitive_op::REDUCE_MAX: {
+            stream << "[axes=";
+            emit_tuple(stream, std::get<reduce_max_params>(eq.get_params()).axes);
+            stream << ']';
+            break;
+        }
+
+        case primitive_op::REDUCE_MIN: {
+            stream << "[axes=";
+            emit_tuple(stream, std::get<reduce_min_params>(eq.get_params()).axes);
+            stream << ']';
+            break;
+        }
+
         case primitive_op::BROADCAST_IN_DIM: {
             const auto& params = std::get<broadcast_in_dim_params>(eq.get_params());
             stream << "[shape=";
@@ -133,6 +147,47 @@ std::ostream& emit_equation(std::ostream& stream, const equation& eq, size_t tab
             << ", num_consts=" << params.num_consts
             << ", num_carry=" << params.num_carry
             << (params.reverse ? ", reverse=true": "") << ']';
+            break;
+        }
+
+        case primitive_op::RESHAPE: {
+            stream << "[new_sizes=";
+            emit_tuple(stream, std::get<reshape_params>(eq.get_params()).new_sizes);
+            stream << ']';
+            break;
+        }
+
+        case primitive_op::CONCATENATE: {
+            stream << "[dimension=" << std::get<concatenate_params>(eq.get_params()).dimension << ']';
+            break;
+        }
+
+        case primitive_op::SLICE: {
+            const auto& params = std::get<slice_params>(eq.get_params());
+            stream << "[start_indices=";
+            emit_tuple(stream, params.start_indices);
+            stream << ", limit_indices=";
+            emit_tuple(stream, params.limit_indices);
+            stream << ", strides=";
+            emit_tuple(stream, params.strides);
+            stream << ']';
+            break;
+        }
+
+        case primitive_op::PAD: {
+            const auto& params = std::get<pad_params>(eq.get_params());
+            stream << "[padding_config=(";
+            for (size_t i = 0; i < params.padding_config.size(); i++) {
+                auto [low, high, interior] = params.padding_config[i];
+                stream << '(' << low << ", " << high << ", " << interior << ')';
+                if (i != params.padding_config.size() - 1) stream << ", ";
+            }
+            stream << ")]";
+            break;
+        }
+
+        case primitive_op::INTEGER_POW: {
+            stream << "[y=" << std::get<integer_pow_params>(eq.get_params()).y << ']';
             break;
         }
 

@@ -259,6 +259,26 @@ namespace jax {
     array_t pad(const array_t& x,
         const array_t& padding_value,
         const std::vector<std::array<size_t, 3>>& padding_config);
+
+    jaxpr_tracer sqrt(const jaxpr_tracer& x);
+    jaxpr_tracer rsqrt(const jaxpr_tracer& x);
+    jaxpr_tracer tanh(const jaxpr_tracer& x);
+    jaxpr_tracer logistic(const jaxpr_tracer& x);
+
+    jaxpr_tracer integer_pow(const jaxpr_tracer& x, size_t y);
+
+    jaxpr_tracer max(const jaxpr_tracer& t1, const jaxpr_tracer& t2);
+    jaxpr_tracer max(const jaxpr_tracer& t1, const array_t& array);
+    jaxpr_tracer max(const array_t& array, const jaxpr_tracer& t1);
+
+    jaxpr_tracer min(const jaxpr_tracer& t1, const jaxpr_tracer& t2);
+    jaxpr_tracer min(const jaxpr_tracer& t1, const array_t& array);
+    jaxpr_tracer min(const array_t& array, const jaxpr_tracer& t1);
+
+    jaxpr_tracer pow(const jaxpr_tracer& t1, const jaxpr_tracer& t2);
+    jaxpr_tracer pow(const jaxpr_tracer& t1, const array_t& array);
+    jaxpr_tracer pow(const array_t& array, const jaxpr_tracer& t1);
+
 }
 
 
