@@ -319,11 +319,143 @@ void grad_class::propagate_adjoints(equation& eq) {
             break;
         }
 
-        case SQRT: break;
-        case RSQRT: break;
-        case TANH: break;
-        case LOGISTIC: break;
-        case INTEGER_POW: break;
+        case SQRT: {
+            auto& output_var = eq.get_output(0);
+            auto* output_adj = get_adjoint(output_var);
+            if (!output_adj) break;
+
+            auto& input_var = eq.get_input(0).get_var();
+
+            value half = broadcasted_value(output_var.get_type(), 0.5);
+            auto f_prime_var = fresh_var(output_var.get_type());
+
+            output_expr.equations.emplace_back(
+                std::vector{half, value{output_var}},
+                std::vector{f_prime_var},
+                DIV
+            );
+
+            update_adjoint(input_var, value{f_prime_var}, *output_adj);
+            break;
+        }
+
+        case RSQRT: {
+            auto& output_var = eq.get_output(0);
+            auto* output_adj = get_adjoint(output_var);
+            if (!output_adj) break;
+
+            auto& input_var = eq.get_input(0).get_var();
+
+            auto cubed = fresh_var(output_var.get_type());
+
+            output_expr.equations.emplace_back(
+                std::vector{value{output_var}},
+                std::vector{cubed},
+                INTEGER_POW,
+                integer_pow_params{3}
+            );
+
+            value neg_half = broadcasted_value(output_var.get_type(), -0.5);
+            auto f_prime_var = fresh_var(output_var.get_type());
+
+            output_expr.equations.emplace_back(
+                std::vector{neg_half, value{cubed}},
+                std::vector{f_prime_var},
+                MUL
+            );
+
+            update_adjoint(input_var, value{f_prime_var}, *output_adj);
+            break;
+        }
+
+        case TANH: {
+            auto& output_var = eq.get_output(0);
+            auto* output_adj = get_adjoint(output_var);
+            if (!output_adj) break;
+
+            auto& input_var = eq.get_input(0).get_var();
+
+            auto squared = fresh_var(output_var.get_type());
+
+            output_expr.equations.emplace_back(
+                std::vector{value{output_var}},
+                std::vector{squared},
+                INTEGER_POW,
+                integer_pow_params{2}
+            );
+
+            value one = broadcasted_value(output_var.get_type(), 1.);
+            auto f_prime_var = fresh_var(output_var.get_type());
+
+            output_expr.equations.emplace_back(
+                std::vector{one, value{squared}},
+                std::vector{f_prime_var},
+                SUB
+            );
+
+            update_adjoint(input_var, value{f_prime_var}, *output_adj);
+            break;
+        }
+
+        case LOGISTIC: {
+            auto& output_var = eq.get_output(0);
+            auto* output_adj = get_adjoint(output_var);
+            if (!output_adj) break;
+
+            auto& input_var = eq.get_input(0).get_var();
+
+            value one = broadcasted_value(output_var.get_type(), 1.);
+            auto one_minus = fresh_var(output_var.get_type());
+
+            output_expr.equations.emplace_back(
+                std::vector{one, value{output_var}},
+                std::vector{one_minus},
+                SUB
+            );
+
+            auto f_prime_var = fresh_var(output_var.get_type());
+
+            output_expr.equations.emplace_back(
+                std::vector{value{output_var}, value{one_minus}},
+                std::vector{f_prime_var},
+                MUL
+            );
+
+            update_adjoint(input_var, value{f_prime_var}, *output_adj);
+            break;
+        }
+
+        case INTEGER_POW: {
+            auto& output_var = eq.get_output(0);
+            auto* output_adj = get_adjoint(output_var);
+            if (!output_adj) break;
+
+            auto& input_var = eq.get_input(0).get_var();
+
+            size_t n = std::get<integer_pow_params>(eq.get_params()).y;
+            if (n == 0) break;
+
+            auto reduced_pow = fresh_var(input_var.get_type());
+
+            output_expr.equations.emplace_back(
+                std::vector{value{input_var}},
+                std::vector{reduced_pow},
+                INTEGER_POW,
+                integer_pow_params{n - 1}
+            );
+
+            value coeff = broadcasted_value(input_var.get_type(), static_cast<double>(n));
+            auto f_prime_var = fresh_var(input_var.get_type());
+
+            output_expr.equations.emplace_back(
+                std::vector{coeff, value{reduced_pow}},
+                std::vector{f_prime_var},
+                MUL
+            );
+
+            update_adjoint(input_var, value{f_prime_var}, *output_adj);
+            break;
+        }
 
         case ADD: {
             // z = x + y
@@ -446,9 +578,111 @@ void grad_class::propagate_adjoints(equation& eq) {
             break;
         }
 
-        case MAX: break;
-        case MIN: break;
-        case POW: break;
+        case MAX:
+        case MIN: {
+            primitive_op comparison = eq.get_op() == MAX ? GT : LT;
+
+            auto& output_var = eq.get_output(0);
+            auto* output_adj = get_adjoint(output_var);
+            if (!output_adj) break;
+
+            auto& x_val = eq.get_input(0);
+            auto& y_val = eq.get_input(1);
+
+            auto mask = fresh_var(type_t{dtype_t::BOOL, output_var.get_shape()});
+
+            output_expr.equations.emplace_back(
+                std::vector{x_val, y_val},
+                std::vector{mask},
+                comparison
+            );
+
+            value zero = broadcasted_value(output_var.get_type(), 0.);
+
+            if (x_val.is<var_t>()) {
+                auto selected = fresh_var(output_var.get_type());
+
+                output_expr.equations.emplace_back(
+                    std::vector{value{mask}, zero, *output_adj},
+                    std::vector{selected},
+                    SELECT
+                );
+
+                update_adjoint(x_val.get_var(), value{selected});
+            }
+
+            if (y_val.is<var_t>()) {
+                auto selected = fresh_var(output_var.get_type());
+
+                output_expr.equations.emplace_back(
+                    std::vector{value{mask}, *output_adj, zero},
+                    std::vector{selected},
+                    SELECT
+                );
+
+                update_adjoint(y_val.get_var(), value{selected});
+            }
+            break;
+        }
+
+        case POW: {
+            auto& output_var = eq.get_output(0);
+            auto* output_adj = get_adjoint(output_var);
+            if (!output_adj) break;
+
+            auto& x_val = eq.get_input(0);
+            auto& y_val = eq.get_input(1);
+
+            if (x_val.is<var_t>()) {
+                value one = broadcasted_value(y_val.get_type(), 1.);
+                auto y_minus_one = fresh_var(y_val.get_type());
+
+                output_expr.equations.emplace_back(
+                    std::vector{y_val, one},
+                    std::vector{y_minus_one},
+                    SUB
+                );
+
+                auto reduced_pow = fresh_var(x_val.get_type());
+
+                output_expr.equations.emplace_back(
+                    std::vector{x_val, value{y_minus_one}},
+                    std::vector{reduced_pow},
+                    POW
+                );
+
+                auto f_prime_var = fresh_var(x_val.get_type());
+
+                output_expr.equations.emplace_back(
+                    std::vector{y_val, value{reduced_pow}},
+                    std::vector{f_prime_var},
+                    MUL
+                );
+
+                update_adjoint(x_val.get_var(), value{f_prime_var}, *output_adj);
+            }
+
+            if (y_val.is<var_t>()) {
+                auto log_x = fresh_var(x_val.get_type());
+
+                output_expr.equations.emplace_back(
+                    std::vector{x_val},
+                    std::vector{log_x},
+                    LOG
+                );
+
+                auto f_prime_var = fresh_var(output_var.get_type());
+
+                output_expr.equations.emplace_back(
+                    std::vector{value{output_var}, value{log_x}},
+                    std::vector{f_prime_var},
+                    MUL
+                );
+
+                update_adjoint(y_val.get_var(), value{f_prime_var}, *output_adj);
+            }
+            break;
+        }
 
         case REDUCE_SUM: {
             auto& output_var = eq.get_output(0);
@@ -481,8 +715,61 @@ void grad_class::propagate_adjoints(equation& eq) {
             break;
         }
 
-        case REDUCE_MAX: break;
-        case REDUCE_MIN: break;
+        case REDUCE_MAX:
+        case REDUCE_MIN: {
+            auto& output_var = eq.get_output(0);
+            auto* output_adj = get_adjoint(output_var);
+            if (!output_adj) break;
+
+            auto& input_val = eq.get_input(0);
+            if (input_val.is<literal_t>()) break;
+            auto& input_var = input_val.get_var();
+
+            const auto& input_type = input_var.get_type();
+            const auto& axes = eq.get_op() == REDUCE_MAX
+                ? std::get<reduce_max_params>(eq.get_params()).axes
+                : std::get<reduce_min_params>(eq.get_params()).axes;
+
+            std::vector<size_t> axes_complement = complement(axes, input_type.get_shape().size());
+
+            auto broadcast_output = fresh_var(input_type);
+
+            output_expr.equations.emplace_back(
+                std::vector{value{output_var}},
+                std::vector{broadcast_output},
+                BROADCAST_IN_DIM,
+                broadcast_in_dim_params{input_type.get_shape(), axes_complement}
+            );
+
+            auto mask = fresh_var(type_t{dtype_t::BOOL, input_type.get_shape()});
+
+            output_expr.equations.emplace_back(
+                std::vector{value{input_var}, value{broadcast_output}},
+                std::vector{mask},
+                EQ
+            );
+
+            auto broadcast_adjoint = fresh_var(input_type);
+
+            output_expr.equations.emplace_back(
+                std::vector{*output_adj},
+                std::vector{broadcast_adjoint},
+                BROADCAST_IN_DIM,
+                broadcast_in_dim_params{input_type.get_shape(), axes_complement}
+            );
+
+            value zero = broadcasted_value(input_type, 0.);
+            auto selected = fresh_var(input_type);
+
+            output_expr.equations.emplace_back(
+                std::vector{value{mask}, zero, value{broadcast_adjoint}},
+                std::vector{selected},
+                SELECT
+            );
+
+            update_adjoint(input_var, value{selected});
+            break;
+        }
 
         case BROADCAST_IN_DIM: {
 
