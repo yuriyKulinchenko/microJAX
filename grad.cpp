@@ -435,6 +435,25 @@ void grad_class::propagate_adjoints(equation& eq) {
             size_t n = std::get<integer_pow_params>(eq.get_params()).y;
             if (n == 0) break;
 
+            if (n == 1) {
+                update_adjoint(input_var, *output_adj);
+                break;
+            }
+
+            value coeff = broadcasted_value(input_var.get_type(), n);
+            auto f_prime_var = fresh_var(input_var.get_type());
+
+            if (n == 2) {
+                output_expr.equations.emplace_back(
+                    std::vector{coeff, value{input_var}},
+                    std::vector{f_prime_var},
+                    MUL
+                );
+
+                update_adjoint(input_var, value{f_prime_var}, *output_adj);
+                break;
+            }
+
             auto reduced_pow = fresh_var(input_var.get_type());
 
             output_expr.equations.emplace_back(
@@ -443,9 +462,6 @@ void grad_class::propagate_adjoints(equation& eq) {
                 INTEGER_POW,
                 integer_pow_params{n - 1}
             );
-
-            value coeff = broadcasted_value(input_var.get_type(), static_cast<double>(n));
-            auto f_prime_var = fresh_var(input_var.get_type());
 
             output_expr.equations.emplace_back(
                 std::vector{coeff, value{reduced_pow}},
