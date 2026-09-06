@@ -1328,7 +1328,71 @@ void grad_class::propagate_adjoints(equation& eq) {
         }
 
         case SCATTER: {
-            // TODO: clarify possibly ambiguous semantics
+            // y = scatter(x, idx, u)
+            // => x' += select(written_mask, 0, y'), where written_mask = scatter_add(0, idx, 1) > 0
+            // => u' += gather(y', idx)
+            // This assumes that idx provides a unique mapping: breaks otherwise
+
+            auto& input_vals = eq.get_input();
+            auto& output_vars = eq.get_output();
+
+            if (!should_propagate(input_vals, output_vars)) break;
+
+            auto& x = input_vals[0];
+            auto& idx = input_vals[1];
+            auto& u = input_vals[2];
+
+            auto& output_adj = *get_adjoint(output_vars[0]); // Guaranteed not null
+
+            if (x.is<var_t>()) {
+                // written_mask = scatter_add(0, idx, 1) > 0
+                // x' += select(written_mask, 0, y')
+
+                auto& x_type = x.get_var().get_type();
+
+                type_t counting_type {dtype_t::I32, x_type.get_shape()};
+                value zero_tensor = broadcasted_value(counting_type, 0);
+                value one_tensor = broadcasted_value(type_t{dtype_t::I32, u.get_type().get_shape()}, 1);
+
+                var_t written_mask = fresh_var(counting_type);
+
+                output_expr.equations.emplace_back(
+                    std::vector{zero_tensor, idx, one_tensor},
+                    std::vector{written_mask},
+                    SCATTER_ADD
+                );
+
+                var_t clamped_written_mask = fresh_var(type_t{dtype_t::BOOL, x_type.get_shape()});
+
+                output_expr.equations.emplace_back(
+                    std::vector{value{written_mask}, zero_tensor},
+                    std::vector{clamped_written_mask},
+                    GT
+                );
+
+                var_t x_adjoint = fresh_var(x_type);
+
+                output_expr.equations.emplace_back(
+                    std::vector{value{clamped_written_mask}, output_adj, zero_tensor},
+                    std::vector{x_adjoint},
+                    SELECT
+                );
+
+                update_adjoint(x.get_var(), value{x_adjoint});
+            }
+
+            if (u.is<var_t>()) {
+                // => u' += gather(y', idx)
+                var_t u_adjoint = fresh_var(u.get_type());
+
+                output_expr.equations.emplace_back(
+                    std::vector{output_adj, idx},
+                    std::vector{u_adjoint},
+                    GATHER
+                );
+
+                update_adjoint(u.get_var(), value{u_adjoint});
+            }
             break;
         }
 
