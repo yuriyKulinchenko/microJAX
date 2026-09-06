@@ -481,6 +481,9 @@ void grad_class::propagate_adjoints(equation& eq) {
             break;
         }
 
+        case REDUCE_MAX: break;
+        case REDUCE_MIN: break;
+
         case BROADCAST_IN_DIM: {
 
             /*
@@ -1040,7 +1043,7 @@ void grad_class::propagate_adjoints(equation& eq) {
             // Snapshot the inputs before emplacing: broadcasted_value and the
             // update loop below emplace into output_expr.equations, so no
             // reference into that vector may be held across them.
-            std::vector<value> inputs {input_vals};
+            std::vector inputs {input_vals};
 
             auto& output_adj = *get_adjoint(output_vars[0]); // Guaranteed not null
             value zero_tensor = broadcasted_value(output_adj.get_type(), 0.);
@@ -1075,15 +1078,260 @@ void grad_class::propagate_adjoints(equation& eq) {
             break;
         }
 
-        case REDUCE_MAX: break;
-        case REDUCE_MIN: break;
-        case RESHAPE: break;
-        case GATHER: break;
-        case SCATTER_ADD: break;
-        case SCATTER_MUL: break;
-        case SCATTER_MAX: break;
-        case SCATTER_MIN: break;
-        case SCATTER: break;
+        case RESHAPE: {
+            // y = reshape(x, shape)
+            // => x' += reshape(y', shape(x))
+
+            auto& input_vals = eq.get_input();
+            auto& output_vars = eq.get_output();
+
+            if (!should_propagate(input_vals, output_vars)) break;
+
+            auto& x = input_vals[0].get_var();
+            auto& output_adj = *get_adjoint(output_vars[0]); // Guaranteed not null
+
+            var_t x_adjoint = fresh_var(x.get_type());
+
+            output_expr.equations.emplace_back(
+                std::vector{output_adj},
+                std::vector{x_adjoint},
+                RESHAPE,
+                reshape_params {
+                    .new_sizes = x.get_shape()
+                }
+            );
+
+            update_adjoint(x, value{x_adjoint});
+            break;
+        }
+
+        case GATHER: {
+            // y = gather(x, idx)
+            // => x' += scatter-add(0, idx, y')
+
+            auto& input_vals = eq.get_input();
+            auto& output_vars = eq.get_output();
+
+            if (!should_propagate(input_vals, output_vars)) break;
+            if (!input_vals[0].is<var_t>()) break; // Nothing to propagate to x
+
+            auto& x = input_vals[0];
+            auto& idx = input_vals[1];
+
+            auto& output_adj = *get_adjoint(output_vars[0]); // Guaranteed not null
+            value zero_tensor = broadcasted_value(x.get_type(), 0.);
+
+            var_t scatter_var = fresh_var(x.get_type());
+
+            output_expr.equations.emplace_back(
+                std::vector{zero_tensor, idx, output_adj},
+                std::vector{scatter_var},
+                SCATTER_ADD
+            );
+
+            update_adjoint(x.get_var(), value{scatter_var});
+            break;
+        }
+
+        case SCATTER_ADD: {
+            // y = scatter-add(x, idx, u)
+            // => x' += y'
+            // => u' += gather(y', idx)
+
+            auto& input_vals = eq.get_input();
+            auto& output_vars = eq.get_output();
+
+            if (!should_propagate(input_vals, output_vars)) break;
+
+            auto& x = input_vals[0];
+            auto& idx = input_vals[1];
+            auto& u = input_vals[2];
+
+            auto& output_adj = *get_adjoint(output_vars[0]); // Guaranteed not null
+
+            if (x.is<var_t>()) {
+                update_adjoint(x.get_var(), output_adj);
+            }
+
+            if (u.is<var_t>()) {
+                var_t u_adjoint = fresh_var(u.get_type());
+
+                output_expr.equations.emplace_back(
+                    std::vector{output_adj, idx},
+                    std::vector{u_adjoint},
+                    GATHER
+                );
+
+                update_adjoint(u.get_var(), value{u_adjoint});
+            }
+            break;
+        }
+
+        case SCATTER_MUL: {
+            // y = scatter-mul(x, idx, u)
+            // => x' += y' * y / x <=> x += scatter-mul(y', idx, u)
+            // => u' += gather(y', idx) * gather(y, idx) / u (corner-case division-by-zero issue here)
+
+            auto& input_vals = eq.get_input();
+            auto& output_vars = eq.get_output();
+
+            if (!should_propagate(input_vals, output_vars)) break;
+
+            auto& x = input_vals[0];
+            auto& idx = input_vals[1];
+            auto& u = input_vals[2];
+            auto& y = output_vars[0];
+
+            auto& output_adj = *get_adjoint(output_vars[0]); // Guaranteed not null
+
+            if (x.is<var_t>()) {
+                // x += scatter-mul(y', idx, u)
+                auto& x_type = x.get_var().get_type();
+
+                var_t x_adjoint = fresh_var(x_type);
+
+                output_expr.equations.emplace_back(
+                    std::vector{output_adj, idx, u},
+                    std::vector{x_adjoint},
+                    SCATTER_MUL
+                );
+
+                update_adjoint(x.get_var(), value{x_adjoint});
+            }
+
+            if (u.is<var_t>()) {
+                // u' += gather(y', idx) * gather(y, idx) / u
+                auto& u_type = u.get_var().get_type();
+
+                var_t gather_y = fresh_var(u_type);
+
+                output_expr.equations.emplace_back(
+                    std::vector{value{y}, idx},
+                    std::vector{gather_y},
+                    GATHER
+                );
+
+                var_t gather_y_adj = fresh_var(u_type);
+
+                output_expr.equations.emplace_back(
+                    std::vector{output_adj, idx},
+                    std::vector{gather_y_adj},
+                    GATHER
+                );
+
+                var_t product = fresh_var(u_type);
+
+                output_expr.equations.emplace_back(
+                    std::vector{value{gather_y}, value{gather_y_adj}},
+                    std::vector{product},
+                    MUL
+                );
+
+                var_t quotient = fresh_var(u_type);
+
+                output_expr.equations.emplace_back(
+                    std::vector{value{product}, u},
+                    std::vector{quotient},
+                    DIV
+                );
+
+                update_adjoint(u.get_var(), value{quotient});
+            }
+            break;
+        }
+
+        case SCATTER_MAX:
+        case SCATTER_MIN: {
+            // y = scatter-max(x, idx, u)
+            // => x' += select(y > x, y', 0)
+            // => u' += select(gather(y, idx) > u, gather(y', idx), 0)
+            // Derivation is identical for scatter-min, with signs flipped.
+
+            primitive_op comparison = eq.get_op() == SCATTER_MAX ? GT: LT;
+
+            auto& input_vals = eq.get_input();
+            auto& output_vars = eq.get_output();
+
+            if (!should_propagate(input_vals, output_vars)) break;
+
+            auto& x = input_vals[0];
+            auto& idx = input_vals[1];
+            auto& u = input_vals[2];
+            auto& y = output_vars[0];
+
+            auto& output_adj = *get_adjoint(output_vars[0]); // Guaranteed not null
+
+            if (x.is<var_t>()) {
+                // x' += select(y > x, y', 0)
+                auto& x_type = x.get_var().get_type();
+
+                var_t condition = fresh_var(type_t{dtype_t::BOOL, x_type.get_shape()});
+
+                output_expr.equations.emplace_back(
+                    std::vector{value{y}, x},
+                    std::vector{condition},
+                    comparison
+                );
+
+                value x_zero_tensor = broadcasted_value(x_type, 0.);
+                var_t selected_x = fresh_var(x_type);
+
+                output_expr.equations.emplace_back(
+                    std::vector{value{condition}, output_adj, x_zero_tensor},
+                    std::vector{selected_x},
+                    SELECT
+                );
+
+                update_adjoint(x.get_var(), value{selected_x});
+            }
+
+            if (u.is<var_t>()) {
+                // u' += select(gather(y, idx) > u, gather(y', idx), 0)
+                auto& u_type = u.get_var().get_type();
+
+                var_t gather_y = fresh_var(u_type);
+
+                output_expr.equations.emplace_back(
+                    std::vector{value{y}, idx},
+                    std::vector{gather_y},
+                    GATHER
+                );
+
+                var_t condition = fresh_var(type_t{dtype_t::BOOL, u_type.get_shape()});
+
+                output_expr.equations.emplace_back(
+                    std::vector{value{gather_y}, u},
+                    std::vector{condition},
+                    comparison
+                );
+
+                var_t gather_y_adj = fresh_var(u_type);
+
+                output_expr.equations.emplace_back(
+                    std::vector{output_adj, idx},
+                    std::vector{gather_y_adj},
+                    GATHER
+                );
+
+                value u_zero_tensor = broadcasted_value(u_type, 0.);
+                var_t selected_u = fresh_var(u_type);
+
+                output_expr.equations.emplace_back(
+                    std::vector{value{condition}, value{gather_y_adj}, u_zero_tensor},
+                    std::vector{selected_u},
+                    SELECT
+                );
+
+                update_adjoint(u.get_var(), value{selected_u});
+            }
+            break;
+        }
+
+        case SCATTER: {
+            // TODO: clarify possibly ambiguous semantics
+            break;
+        }
+
         case CONCATENATE: break;
         case SLICE: break;
         case PAD: break;
