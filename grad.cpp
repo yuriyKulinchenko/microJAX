@@ -1396,9 +1396,199 @@ void grad_class::propagate_adjoints(equation& eq) {
             break;
         }
 
-        case CONCATENATE: break;
-        case SLICE: break;
-        case PAD: break;
+        case CONCATENATE: {
+            using namespace std::views;
+            // y = concatenate(x1, ..., xN)
+            // => xi' += slice(y', ...)
+
+            auto& input_vals = eq.get_input();
+            auto& output_vars = eq.get_output();
+
+            size_t concatenation_axis = std::get<concatenate_params>(eq.get_params()).dimension;
+
+            if (!should_propagate(input_vals, output_vars)) break;
+
+            var_t& y = output_vars[0];
+            size_t rank = y.get_shape().size();
+
+            auto& output_adj = *get_adjoint(y); // Guaranteed not null
+
+            auto get_slice_params = [&, concatenation_axis](size_t start, size_t limit) -> slice_params {
+                std::vector<size_t> start_indices (y.get_shape().size(), 0);
+                std::vector limit_indices {y.get_shape()};
+
+                start_indices[concatenation_axis] = start;
+                limit_indices[concatenation_axis] = limit;
+
+                return slice_params {
+                    .start_indices = std::move(start_indices),
+                    .limit_indices = std::move(limit_indices),
+                    .strides = std::vector<size_t>(rank, 1)
+                };
+            };
+
+            // Invariant: at the start of each loop, start == limit
+            size_t start = 0, limit = 0;
+
+            // All tensors that are concatenated are guaranteed to be variables:
+            for (auto& x: input_vals) {
+                auto& x_var = x.get_var();
+                limit += x_var.get_shape()[concatenation_axis];
+
+                var_t sliced_x = fresh_var(x.get_type());
+
+                output_expr.equations.emplace_back(
+                    std::vector{output_adj},
+                    std::vector{sliced_x},
+                    SLICE,
+                    get_slice_params(start, limit)
+                );
+
+                update_adjoint(x_var, value{sliced_x});
+
+                start = limit;
+            }
+
+            break;
+        }
+
+        case SLICE: {
+            using namespace std::views;
+            // y = slice(x, ...)
+            // => x' += pad(y', 0, ...)
+
+            auto& input_vals = eq.get_input();
+            auto& output_vars = eq.get_output();
+
+            if (!should_propagate(input_vals, output_vars)) break;
+
+            auto& params = std::get<slice_params>(eq.get_params());
+            auto& start_indices = params.start_indices;
+            auto& strides = params.strides;
+
+            auto& x = input_vals[0].get_var();
+            auto& y = output_vars[0];
+            size_t rank = x.get_shape().size();
+
+            auto& output_adj = *get_adjoint(output_vars[0]); // Guaranteed not null
+
+            value zero = broadcasted_value(type_t{x.get_dtype(), {}}, 0.);
+            var_t padded_adjoint = fresh_var(x.get_type());
+
+            // (low, high, interior) list:
+            std::vector<std::array<size_t, 3>> padding_config {}; padding_config.reserve(rank);
+
+            for (auto [start, stride, x_dim, y_dim]: zip(start_indices, strides, x.get_shape(), y.get_shape())) {
+                size_t low = start;
+                size_t high = x_dim - start - y_dim - (y_dim - 1) * (stride - 1);
+                size_t interior = stride - 1;
+                padding_config.push_back({low, high, interior});
+            }
+
+            output_expr.equations.emplace_back(
+                std::vector{output_adj, zero},
+                std::vector{padded_adjoint},
+                PAD,
+                pad_params {
+                    .padding_config = std::move(padding_config)
+                }
+            );
+
+            update_adjoint(x, value{padded_adjoint});
+            break;
+        }
+
+        case PAD: {
+            using namespace std::views;
+            // y = pad(x, k, ...)
+            // => x' += slice(y', ...)
+            // => k' += reduce-sum(mask * y', all axes), where mask = pad(0, 1, ...)
+
+            auto& input_vals = eq.get_input();
+            auto& output_vars = eq.get_output();
+
+            if (!should_propagate(input_vals, output_vars)) break;
+
+            auto& padding_config = std::get<pad_params>(eq.get_params()).padding_config;
+
+            auto& x = input_vals[0];
+            auto& k = input_vals[1];
+            auto& y = output_vars[0];
+
+            auto& output_adj = *get_adjoint(output_vars[0]); // Guaranteed not null
+
+            size_t rank = y.get_shape().size();
+
+            if (x.is<var_t>()) {
+               // x' += slice(y', ...)
+                // Sort the slice params:
+
+                auto& x_var = x.get_var();
+
+                std::vector<size_t> start_indices {}; start_indices.reserve(rank);
+                std::vector<size_t> limit_indices {}; limit_indices.reserve(rank);
+                std::vector<size_t> strides {}; strides.reserve(rank);
+
+                for (auto [padding, y_dim]: zip(padding_config, y.get_shape())) {
+                    auto [low, high, interior] = padding;
+                    start_indices.push_back(low);
+                    limit_indices.push_back(y_dim - high);
+                    strides.push_back(interior + 1);
+                }
+
+                var_t sliced_adjoint = fresh_var(x.get_type());
+
+                output_expr.equations.emplace_back(
+                    std::vector{output_adj},
+                    std::vector{sliced_adjoint},
+                    SLICE,
+                    slice_params {
+                        .start_indices = std::move(start_indices),
+                        .limit_indices = std::move(limit_indices),
+                        .strides = std::move(strides)
+                    }
+                );
+
+                update_adjoint(x_var, value{sliced_adjoint});
+            }
+
+            if (k.is<var_t>()) {
+                // k' += reduce-sum(mask * y', all axes), where mask = pad(0, 1, ...)
+
+                value zero = broadcasted_value(x.get_type(), 0.);
+                value one = broadcasted_value(type_t{x.get_dtype(), {}}, 1.);
+                var_t mask = fresh_var(y.get_type());
+
+                output_expr.equations.emplace_back(
+                    std::vector{zero, one},
+                    std::vector{mask},
+                    PAD,
+                    pad_params{padding_config}
+                );
+
+                var_t masked = fresh_var(y.get_type());
+
+                output_expr.equations.emplace_back(
+                    std::vector{value{mask}, output_adj},
+                    std::vector{masked},
+                    MUL
+                );
+
+                var_t reduction = fresh_var(k.get_type()); // Shape is scalar
+
+                output_expr.equations.emplace_back(
+                    std::vector{value{masked}},
+                    std::vector{reduction},
+                    REDUCE_SUM,
+                    reduce_sum_params {
+                        .axes = iota(rank) | std::ranges::to<std::vector<size_t>>()
+                    }
+                );
+
+                update_adjoint(k.get_var(), value{reduction});
+            }
+            break;
+        }
 
         case EQ:
         case NE:
