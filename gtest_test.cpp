@@ -603,3 +603,230 @@ TEST(grad_fdm_check, div_and_trig) {
         EXPECT_NEAR(analytic[i].get_value()[0], numeric[i].get_value()[0], 1e-3);
     }
 }
+
+// ============================ grad of new unary ops ============================
+// Closed form: single scalar in / scalar out, checked against the hand-derivative.
+
+TEST(grad_closed_form, sqrt) {
+    using namespace jax; using enum dtype_t;
+    expression d {grad(get_jaxpr([](auto x) { return sqrt(x); }, type_t{F32}))};
+    // d/dx sqrt(x) = 1 / (2 sqrt(x))
+    EXPECT_EQ(invoke_vm(d, array_t{2.5}), array_t{0.5} / sqrt(array_t{2.5}));
+    EXPECT_EQ(invoke_vm(d, array_t{0.7}), array_t{0.5} / sqrt(array_t{0.7}));
+}
+
+TEST(grad_closed_form, rsqrt) {
+    using namespace jax; using enum dtype_t;
+    expression d {grad(get_jaxpr([](auto x) { return rsqrt(x); }, type_t{F32}))};
+    // d/dx x^{-1/2} = -1/2 x^{-3/2} = -1/2 rsqrt(x)^3
+    EXPECT_EQ(invoke_vm(d, array_t{2.5}), array_t{-0.5} * integer_pow(rsqrt(array_t{2.5}), 3));
+    EXPECT_EQ(invoke_vm(d, array_t{0.7}), array_t{-0.5} * integer_pow(rsqrt(array_t{0.7}), 3));
+}
+
+TEST(grad_closed_form, tanh) {
+    using namespace jax; using enum dtype_t;
+    expression d {grad(get_jaxpr([](auto x) { return tanh(x); }, type_t{F32}))};
+    // d/dx tanh(x) = 1 - tanh(x)^2
+    EXPECT_EQ(invoke_vm(d, array_t{0.4}), array_t{1.} - tanh(array_t{0.4}) * tanh(array_t{0.4}));
+    EXPECT_EQ(invoke_vm(d, array_t{-1.2}), array_t{1.} - tanh(array_t{-1.2}) * tanh(array_t{-1.2}));
+}
+
+TEST(grad_closed_form, logistic) {
+    using namespace jax; using enum dtype_t;
+    expression d {grad(get_jaxpr([](auto x) { return logistic(x); }, type_t{F32}))};
+    // d/dx sigma(x) = sigma(x) (1 - sigma(x))
+    EXPECT_EQ(invoke_vm(d, array_t{0.4}), logistic(array_t{0.4}) * (array_t{1.} - logistic(array_t{0.4})));
+    EXPECT_EQ(invoke_vm(d, array_t{-1.2}), logistic(array_t{-1.2}) * (array_t{1.} - logistic(array_t{-1.2})));
+}
+
+TEST(grad_closed_form, integer_pow) {
+    using namespace jax; using enum dtype_t;
+    array_t input {1.7};
+    // n == 1 and n == 2 are carved out; n == 3, 5 exercise the general path.
+    expression d1 {grad(get_jaxpr([](auto x) { return integer_pow(x, 1); }, type_t{F32}))};
+    expression d2 {grad(get_jaxpr([](auto x) { return integer_pow(x, 2); }, type_t{F32}))};
+    expression d3 {grad(get_jaxpr([](auto x) { return integer_pow(x, 3); }, type_t{F32}))};
+    expression d5 {grad(get_jaxpr([](auto x) { return integer_pow(x, 5); }, type_t{F32}))};
+
+    EXPECT_EQ(invoke_vm(d1, input), array_t{1.});
+    EXPECT_EQ(invoke_vm(d2, input), array_t{2.} * input);
+    EXPECT_EQ(invoke_vm(d3, input), array_t{3.} * integer_pow(input, 2));
+    EXPECT_EQ(invoke_vm(d5, input), array_t{5.} * integer_pow(input, 4));
+}
+
+// ============================ grad of new binary ops ============================
+
+TEST(grad_closed_form, pow) {
+    using namespace jax; using enum dtype_t;
+    array_t x {1.8};
+    array_t y {2.3};
+    expression d {grad(get_jaxpr([](auto x, auto y) { return pow(x, y); }, type_t{F32}, type_t{F32}))};
+    // dz/dx = y x^{y-1}, dz/dy = x^y ln(x)
+    std::vector expected { y * pow(x, y - array_t{1.}), pow(x, y) * log(x) };
+    EXPECT_EQ(invoke_vm<false>(d, {x, y}), expected);
+}
+
+TEST(grad_closed_form, max) {
+    using namespace jax; using enum dtype_t;
+    expression d {grad(get_jaxpr([](auto x, auto y) { return max(x, y); }, type_t{F32}, type_t{F32}))};
+    // Gradient flows to the larger operand; ties are routed to the second (y).
+    EXPECT_EQ(invoke_vm<false>(d, {array_t{5.}, array_t{2.}}), (std::vector<array_t>{1., 0.}));
+    EXPECT_EQ(invoke_vm<false>(d, {array_t{2.}, array_t{5.}}), (std::vector<array_t>{0., 1.}));
+    EXPECT_EQ(invoke_vm<false>(d, {array_t{3.}, array_t{3.}}), (std::vector<array_t>{0., 1.}));
+}
+
+TEST(grad_closed_form, min) {
+    using namespace jax; using enum dtype_t;
+    expression d {grad(get_jaxpr([](auto x, auto y) { return min(x, y); }, type_t{F32}, type_t{F32}))};
+    // Gradient flows to the smaller operand; ties are routed to the second (y).
+    EXPECT_EQ(invoke_vm<false>(d, {array_t{2.}, array_t{5.}}), (std::vector<array_t>{1., 0.}));
+    EXPECT_EQ(invoke_vm<false>(d, {array_t{5.}, array_t{2.}}), (std::vector<array_t>{0., 1.}));
+    EXPECT_EQ(invoke_vm<false>(d, {array_t{3.}, array_t{3.}}), (std::vector<array_t>{0., 1.}));
+}
+
+// ============================ grad of tensor ops via FDM ============================
+// The tensor ops need vector inputs, but grad_fdm only perturbs scalars, so each
+// test stacks a handful of scalar inputs into a vector, applies the op, and reduces
+// back to a scalar. Distinct values keep max/min/argmax away from ties.
+
+template <typename... Ts>
+auto stack_scalars(const Ts&... xs) {
+    using namespace jax;
+    return concatenate(std::tuple{xs.broadcast_in_dim({1}, {})...}, 0);
+}
+
+void check_grad_fdm(const jax::expression& jaxpr, std::vector<jax::array_t> inputs, double tol = 1e-3) {
+    using namespace jax;
+    auto analytic = invoke_vm<false>(grad(jaxpr), inputs);
+    auto numeric = grad_fdm(jaxpr, inputs, 1e-6);
+    ASSERT_EQ(analytic.size(), numeric.size());
+    for (size_t i = 0; i < analytic.size(); i++) {
+        EXPECT_NEAR(analytic[i].get_value()[0], numeric[i].get_value()[0], tol);
+    }
+}
+
+TEST(grad_tensor_fdm, reduce_max) {
+    using namespace jax; using enum dtype_t;
+    auto f = [](auto a, auto b, auto c) { return reduce_max(stack_scalars(a, b, c), {0}); };
+    expression jaxpr = get_jaxpr(f, type_t{F32}, type_t{F32}, type_t{F32});
+    check_grad_fdm(jaxpr, {array_t{1.}, array_t{3.}, array_t{2.}});
+    check_grad_fdm(jaxpr, {array_t{4.}, array_t{-1.}, array_t{0.5}});
+}
+
+TEST(grad_tensor_fdm, reduce_min) {
+    using namespace jax; using enum dtype_t;
+    auto f = [](auto a, auto b, auto c) { return reduce_min(stack_scalars(a, b, c), {0}); };
+    expression jaxpr = get_jaxpr(f, type_t{F32}, type_t{F32}, type_t{F32});
+    check_grad_fdm(jaxpr, {array_t{3.}, array_t{1.}, array_t{2.}});
+    check_grad_fdm(jaxpr, {array_t{-1.}, array_t{4.}, array_t{0.5}});
+}
+
+TEST(grad_tensor_fdm, concatenate) {
+    using namespace jax; using enum dtype_t;
+    auto f = [](auto a, auto b, auto c) { return reduce_sum(sin(stack_scalars(a, b, c)), {0}); };
+    expression jaxpr = get_jaxpr(f, type_t{F32}, type_t{F32}, type_t{F32});
+    check_grad_fdm(jaxpr, {array_t{0.5}, array_t{1.1}, array_t{-0.3}});
+}
+
+TEST(grad_tensor_fdm, reshape) {
+    using namespace jax; using enum dtype_t;
+    auto f = [](auto a, auto b, auto c, auto d) {
+        return reduce_sum(sin(reshape(stack_scalars(a, b, c, d), {2, 2})), {0, 1});
+    };
+    expression jaxpr = get_jaxpr(f, type_t{F32}, type_t{F32}, type_t{F32}, type_t{F32});
+    check_grad_fdm(jaxpr, {array_t{0.5}, array_t{1.1}, array_t{-0.3}, array_t{0.9}});
+}
+
+TEST(grad_tensor_fdm, slice) {
+    using namespace jax; using enum dtype_t;
+    // Length-4 vector, slice [1, 4) with stride 2 -> indices {1, 3}.
+    auto f = [](auto a, auto b, auto c, auto d) {
+        return reduce_sum(sin(slice(stack_scalars(a, b, c, d), {1}, {4}, {2})), {0});
+    };
+    expression jaxpr = get_jaxpr(f, type_t{F32}, type_t{F32}, type_t{F32}, type_t{F32});
+    check_grad_fdm(jaxpr, {array_t{0.5}, array_t{1.1}, array_t{-0.3}, array_t{0.9}});
+}
+
+TEST(grad_tensor_fdm, pad) {
+    using namespace jax; using enum dtype_t;
+    // Length-2 vector, (low, high, interior) = (1, 1, 1) -> length 5: [k, a, k, b, k].
+    // Exercises both the operand (slice) and pad-value (masked sum) branches.
+    auto f = [](auto a, auto b, auto k) {
+        return reduce_sum(sin(pad(stack_scalars(a, b), k, {{1, 1, 1}})), {0});
+    };
+    expression jaxpr = get_jaxpr(f, type_t{F32}, type_t{F32}, type_t{F32});
+
+    std::cout << jaxpr;
+    check_grad_fdm(jaxpr, {array_t{0.5}, array_t{1.1}, array_t{-0.3}});
+}
+
+TEST(grad_tensor_fdm, gather) {
+    using namespace jax; using enum dtype_t;
+    auto f = [](auto a, auto b, auto c) {
+        auto v = stack_scalars(a, b, c);
+        array_t idx {type_t{I32, 3}, {2, 0, 2}};
+        return reduce_sum(sin(v.at(idx).get()), {0});
+    };
+    expression jaxpr = get_jaxpr(f, type_t{F32}, type_t{F32}, type_t{F32});
+    check_grad_fdm(jaxpr, {array_t{0.5}, array_t{1.1}, array_t{-0.3}});
+}
+
+TEST(grad_tensor_fdm, scatter_add) {
+    using namespace jax; using enum dtype_t;
+    // operand {a, b}, add update {c} at index 0 -> [a + c, b].
+    auto f = [](auto a, auto b, auto c) {
+        auto operand = stack_scalars(a, b);
+        array_t idx {type_t{I32, 1}, {0}};
+        return reduce_sum(sin(operand.at(idx).add(c.broadcast_in_dim({1}, {}))), {0});
+    };
+    expression jaxpr = get_jaxpr(f, type_t{F32}, type_t{F32}, type_t{F32});
+    check_grad_fdm(jaxpr, {array_t{0.5}, array_t{1.1}, array_t{-0.3}});
+}
+
+TEST(grad_tensor_fdm, scatter_mul) {
+    using namespace jax; using enum dtype_t;
+    // operand {a, b}, multiply update {c} at index 0 -> [a * c, b]. Nonzero c avoids /0.
+    auto f = [](auto a, auto b, auto c) {
+        auto operand = stack_scalars(a, b);
+        array_t idx {type_t{I32, 1}, {0}};
+        return reduce_sum(operand.at(idx).multiply(c.broadcast_in_dim({1}, {})), {0});
+    };
+    expression jaxpr = get_jaxpr(f, type_t{F32}, type_t{F32}, type_t{F32});
+    check_grad_fdm(jaxpr, {array_t{1.5}, array_t{1.1}, array_t{2.3}});
+}
+
+TEST(grad_tensor_fdm, scatter_max) {
+    using namespace jax; using enum dtype_t;
+    auto f = [](auto a, auto b, auto c) {
+        auto operand = stack_scalars(a, b);
+        array_t idx {type_t{I32, 1}, {0}};
+        return reduce_sum(operand.at(idx).max(c.broadcast_in_dim({1}, {})), {0});
+    };
+    expression jaxpr = get_jaxpr(f, type_t{F32}, type_t{F32}, type_t{F32});
+    check_grad_fdm(jaxpr, {array_t{3.0}, array_t{1.1}, array_t{1.0}}); // operand wins at index 0
+    check_grad_fdm(jaxpr, {array_t{0.5}, array_t{1.1}, array_t{2.0}}); // update wins at index 0
+}
+
+TEST(grad_tensor_fdm, scatter_min) {
+    using namespace jax; using enum dtype_t;
+    auto f = [](auto a, auto b, auto c) {
+        auto operand = stack_scalars(a, b);
+        array_t idx {type_t{I32, 1}, {0}};
+        return reduce_sum(operand.at(idx).min(c.broadcast_in_dim({1}, {})), {0});
+    };
+    expression jaxpr = get_jaxpr(f, type_t{F32}, type_t{F32}, type_t{F32});
+    check_grad_fdm(jaxpr, {array_t{0.5}, array_t{1.1}, array_t{2.0}}); // operand wins at index 0
+    check_grad_fdm(jaxpr, {array_t{3.0}, array_t{1.1}, array_t{1.0}}); // update wins at index 0
+}
+
+TEST(grad_tensor_fdm, scatter) {
+    using namespace jax; using enum dtype_t;
+    // Overwrite index 0 with the update -> [c, b]; the operand's index 0 gets no gradient.
+    auto f = [](auto a, auto b, auto c) {
+        auto operand = stack_scalars(a, b);
+        array_t idx {type_t{I32, 1}, {0}};
+        return reduce_sum(sin(operand.at(idx).set(c.broadcast_in_dim({1}, {}))), {0});
+    };
+    expression jaxpr = get_jaxpr(f, type_t{F32}, type_t{F32}, type_t{F32});
+    check_grad_fdm(jaxpr, {array_t{0.5}, array_t{1.1}, array_t{-0.3}});
+}

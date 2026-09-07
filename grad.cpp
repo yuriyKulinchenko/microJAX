@@ -1884,7 +1884,7 @@ void grad_class::propagate_adjoints(equation& eq) {
                     std::vector{reduction},
                     REDUCE_SUM,
                     reduce_sum_params {
-                        .axes = iota(rank) | std::ranges::to<std::vector<size_t>>()
+                        .axes = iota(size_t{0}, rank) | std::ranges::to<std::vector<size_t>>()
                     }
                 );
 
