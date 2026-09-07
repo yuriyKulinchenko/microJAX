@@ -31,6 +31,8 @@ add_executable(microJAX main.cpp
         jax_vm.cpp
         jax_array.cpp
         jax_array.h
+        type_checker.h
+        type_checker.cpp
 )
 
 add_executable(microJAX_tests gtest_test.cpp
