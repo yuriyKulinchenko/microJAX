@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 #include<vector>
+#include <string>
+#include <source_location>
 
 #include "grad.h"
 #include "jax_functions.h"
@@ -7,6 +9,77 @@
 #include "jax_types.h"
 #include "tracer.h"
 #include "jax_format.h"
+
+// Formats a dimension list as "(1, 2, 3)" for diagnostics.
+static std::string format_dims(const std::vector<size_t>& dims) {
+    std::string out = "(";
+    for (size_t i = 0; i < dims.size(); i++) {
+        if (i > 0) out += ", ";
+        out += std::to_string(dims[i]);
+    }
+    return out + ")";
+}
+
+// Decomposes a flat (row-major) index into its multi-dimensional coordinate.
+static std::vector<size_t> unflatten(size_t flat, const std::vector<size_t>& shape) {
+    std::vector<size_t> index(shape.size());
+    for (size_t d = shape.size(); d-- > 0;) {
+        index[d] = flat % shape[d];
+        flat /= shape[d];
+    }
+    return index;
+}
+
+void EXPECT_EQ_TYPE(const type_t& T1, const type_t& T2,
+                    std::source_location loc = std::source_location::current()) {
+    if (T1.get_dtype() != T2.get_dtype()) {
+        ADD_FAILURE_AT(loc.file_name(), loc.line())
+            << "incompatible dtypes: " << to_string(T1.get_dtype())
+            << ", " << to_string(T2.get_dtype());
+    }
+    if (T1.get_shape() != T2.get_shape()) {
+        ADD_FAILURE_AT(loc.file_name(), loc.line())
+            << "incompatible shapes: " << format_dims(T1.get_shape())
+            << ", " << format_dims(T2.get_shape());
+    }
+}
+
+void EXPECT_EQ_ARRAY(const array_t& A, const array_t& B,
+                     std::source_location loc = std::source_location::current()) {
+    EXPECT_EQ_TYPE(A.get_type(), B.get_type(), loc);
+
+    // If the shapes disagree an element-wise comparison is undefined; the type
+    // check above has already reported the mismatch.
+    if (A.get_type().get_shape() != B.get_type().get_shape()) return;
+
+    const std::vector<size_t>& shape = A.get_type().get_shape();
+    const std::vector<double>& a_value = A.get_value();
+    const std::vector<double>& b_value = B.get_value();
+    const bool integral = is_integral(A.get_type().get_dtype());
+
+    for (size_t i = 0; i < a_value.size(); i++) {
+        const bool equal = integral ? a_value[i] == b_value[i] : double_eq(a_value[i], b_value[i]);
+        if (!equal) {
+            ADD_FAILURE_AT(loc.file_name(), loc.line())
+                << "Mismatch at index " << format_dims(unflatten(i, shape))
+                << ": " << a_value[i] << ", " << b_value[i];
+        }
+    }
+}
+
+void EXPECT_EQ_ARRAY(const std::vector<array_t>& A, const std::vector<array_t>& B,
+                     std::source_location loc = std::source_location::current()) {
+    if (A.size() != B.size()) {
+        ADD_FAILURE_AT(loc.file_name(), loc.line())
+            << "incompatible output counts: " << A.size() << ", " << B.size();
+        return;
+    }
+    for (size_t i = 0; i < A.size(); i++) {
+        SCOPED_TRACE("output index " + std::to_string(i));
+        EXPECT_EQ_ARRAY(A[i], B[i], loc);
+    }
+}
+
 
 TEST(sanity, resultant_type_1) {
     using namespace jax;
@@ -45,8 +118,8 @@ TEST(vm, matmul) {
 
     expression jaxpr = get_jaxpr(matmul, type_t{F32, 3, 3}, type_t{F32, 3, 3});
 
-    EXPECT_EQ(matmul(A, B), expected_output);
-    EXPECT_EQ(invoke_vm(jaxpr, {A, B}), expected_output);
+    EXPECT_EQ_ARRAY(matmul(A, B), expected_output);
+    EXPECT_EQ_ARRAY(invoke_vm(jaxpr, {A, B}), expected_output);
 }
 
 TEST(vm, matmul_batch) {
@@ -90,8 +163,8 @@ TEST(vm, matmul_batch) {
 
     jax_vm vm{jaxpr};
 
-    EXPECT_EQ(matmul_batch(A, B), expected_output);
-    EXPECT_EQ(invoke_vm(jaxpr, {A, B}), expected_output);
+    EXPECT_EQ_ARRAY(matmul_batch(A, B), expected_output);
+    EXPECT_EQ_ARRAY(invoke_vm(jaxpr, {A, B}), expected_output);
 }
 
 TEST(grad_closed_form, linear) {
@@ -108,7 +181,7 @@ TEST(grad_closed_form, linear) {
             return 100 * x + 12;
     }, type_t{F32}))};
 
-    EXPECT_EQ(invoke_vm(derivate_jaxpr, input), 100);
+    EXPECT_EQ_ARRAY(invoke_vm(derivate_jaxpr, input), 100);
 }
 
 TEST(grad_closed_form, trig) {
@@ -129,8 +202,8 @@ TEST(grad_closed_form, trig) {
             return cos(x);
     }, type_t{F32}))};
 
-    EXPECT_EQ(invoke_vm(sin_derivative_jaxpr, input), cos(input));
-    EXPECT_EQ(invoke_vm(cos_derivative_jaxpr, input), -sin(input));
+    EXPECT_EQ_ARRAY(invoke_vm(sin_derivative_jaxpr, input), cos(input));
+    EXPECT_EQ_ARRAY(invoke_vm(cos_derivative_jaxpr, input), -sin(input));
 }
 
 TEST(grad_closed_form, exp) {
@@ -146,7 +219,7 @@ TEST(grad_closed_form, exp) {
             return exp(x);
     }, type_t{F32}))};
 
-    EXPECT_EQ(invoke_vm(exp_derivative_jaxpr, input), exp(input));
+    EXPECT_EQ_ARRAY(invoke_vm(exp_derivative_jaxpr, input), exp(input));
 }
 
 TEST(grad_closed_form, log) {
@@ -161,7 +234,7 @@ TEST(grad_closed_form, log) {
         return log(x);
     }, type_t{F32}))};
 
-    EXPECT_EQ(invoke_vm(log_derivative_jaxpr, input), array_t{1.} / input);
+    EXPECT_EQ_ARRAY(invoke_vm(log_derivative_jaxpr, input), array_t{1.} / input);
 };
 
 TEST(grad_closed_form, arithmetic_add) {
@@ -178,7 +251,7 @@ TEST(grad_closed_form, arithmetic_add) {
     }, type_t{F32}, type_t{F32}))};
 
     std::vector<array_t> expected_output {1., 1.};
-    EXPECT_EQ(invoke_vm<false>(sum_grad_jaxpr, {x, y}), expected_output);
+    EXPECT_EQ_ARRAY(invoke_vm<false>(sum_grad_jaxpr, {x, y}), expected_output);
 }
 
 TEST(grad_closed_form, arithmetic_sub) {
@@ -195,7 +268,7 @@ TEST(grad_closed_form, arithmetic_sub) {
     }, type_t{F32}, type_t{F32}))};
 
     std::vector<array_t> expected_output {1., -1.};
-    EXPECT_EQ(invoke_vm<false>(sum_grad_jaxpr, {x, y}), expected_output);
+    EXPECT_EQ_ARRAY(invoke_vm<false>(sum_grad_jaxpr, {x, y}), expected_output);
 }
 
 TEST(grad_closed_form, arithmetic_mul) {
@@ -212,7 +285,7 @@ TEST(grad_closed_form, arithmetic_mul) {
     }, type_t{F32}, type_t{F32}))};
 
     std::vector expected_output {y, x};
-    EXPECT_EQ(invoke_vm<false>(sum_grad_jaxpr, {x, y}), expected_output);
+    EXPECT_EQ_ARRAY(invoke_vm<false>(sum_grad_jaxpr, {x, y}), expected_output);
 }
 
 TEST(grad_closed_form, arithmetic_div) {
@@ -231,7 +304,7 @@ TEST(grad_closed_form, arithmetic_div) {
     auto grad_result = invoke_vm<false>(sum_grad_jaxpr, {x, y});
     std::vector expected_output {array_t{1} / y, - x / (y * y)};
 
-    EXPECT_EQ(grad_result, expected_output);
+    EXPECT_EQ_ARRAY(grad_result, expected_output);
 }
 
 TEST(grad_closed_form, composition_1) {
@@ -247,7 +320,7 @@ TEST(grad_closed_form, composition_1) {
         return exp(sin(x));
     }, type_t{F32}))};
 
-    EXPECT_EQ(invoke_vm(derivative_jaxpr, input), cos(input) * exp(sin(input)));
+    EXPECT_EQ_ARRAY(invoke_vm(derivative_jaxpr, input), cos(input) * exp(sin(input)));
 }
 
 TEST(grad_closed_form, composition_2) {
@@ -263,7 +336,7 @@ TEST(grad_closed_form, composition_2) {
         return log(cos(x) + 2);
     }, type_t{F32}))};
 
-    EXPECT_EQ(invoke_vm(derivative_jaxpr, input),
+    EXPECT_EQ_ARRAY(invoke_vm(derivative_jaxpr, input),
               -sin(input) / (cos(input) + 2));
 }
 
@@ -287,7 +360,7 @@ TEST(grad_closed_form, composition_3) {
         (x * cos(x * y) + sin(x * y)) * exp(y)
     };
 
-    EXPECT_EQ(invoke_vm<false>(grad_jaxpr, {x, y}), expected_output);
+    EXPECT_EQ_ARRAY(invoke_vm<false>(grad_jaxpr, {x, y}), expected_output);
 }
 
 TEST(grad_closed_form, composition_4) {
@@ -313,7 +386,7 @@ TEST(grad_closed_form, composition_4) {
         (-u * v - u / (x + y)) / (v * v)
     };
 
-    EXPECT_EQ(invoke_vm<false>(grad_jaxpr, {x, y}), expected_output);
+    EXPECT_EQ_ARRAY(invoke_vm<false>(grad_jaxpr, {x, y}), expected_output);
 }
 
 std::vector<array_t> grad_fdm(const expression& jaxpr, std::vector<array_t>& x, double h) {
@@ -351,14 +424,14 @@ std::vector<array_t> grad_fdm(const expression& jaxpr, std::vector<array_t>& x, 
 TEST(tensor_broadcast, scalar_to_vector) {
     using namespace jax; using enum dtype_t;
     array_t x {5.};
-    EXPECT_EQ(x.broadcast_in_dim({3}, {}), (array_t{type_t{F32, 3}, {5, 5, 5}}));
+    EXPECT_EQ_ARRAY(x.broadcast_in_dim({3}, {}), (array_t{type_t{F32, 3}, {5, 5, 5}}));
 }
 
 TEST(tensor_broadcast, vector_to_matrix) {
     using namespace jax; using enum dtype_t;
     // src axis 0 maps to target axis 1: each row is a copy of the source vector.
     array_t x {type_t{F32, 3}, {1, 2, 3}};
-    EXPECT_EQ(x.broadcast_in_dim({2, 3}, {1}),
+    EXPECT_EQ_ARRAY(x.broadcast_in_dim({2, 3}, {1}),
               (array_t{type_t{F32, 2, 3}, {1, 2, 3, 1, 2, 3}}));
 }
 
@@ -366,7 +439,7 @@ TEST(tensor_broadcast, stretch_size_one_vector) {
     using namespace jax; using enum dtype_t;
     // A leading dim of size 1 is stretched: [1] -> [4].
     array_t x {type_t{F32, 1}, {7}};
-    EXPECT_EQ(x.broadcast_in_dim({4}, {0}),
+    EXPECT_EQ_ARRAY(x.broadcast_in_dim({4}, {0}),
               (array_t{type_t{F32, 4}, {7, 7, 7, 7}}));
 }
 
@@ -374,7 +447,7 @@ TEST(tensor_broadcast, stretch_size_one_leading) {
     using namespace jax; using enum dtype_t;
     // [1,3] -> [2,3]: the leading 1 is stretched.
     array_t x {type_t{F32, 1, 3}, {1, 2, 3}};
-    EXPECT_EQ(x.broadcast_in_dim({2, 3}, {0, 1}),
+    EXPECT_EQ_ARRAY(x.broadcast_in_dim({2, 3}, {0, 1}),
               (array_t{type_t{F32, 2, 3}, {1, 2, 3, 1, 2, 3}}));
 }
 
@@ -382,7 +455,7 @@ TEST(tensor_broadcast, stretch_size_one_trailing) {
     using namespace jax; using enum dtype_t;
     // [3,1] -> [3,4]: the trailing 1 is stretched.
     array_t x {type_t{F32, 3, 1}, {1, 2, 3}};
-    EXPECT_EQ(x.broadcast_in_dim({3, 4}, {0, 1}),
+    EXPECT_EQ_ARRAY(x.broadcast_in_dim({3, 4}, {0, 1}),
               (array_t{type_t{F32, 3, 4}, {1, 1, 1, 1,
                                            2, 2, 2, 2,
                                            3, 3, 3, 3}}));
@@ -394,7 +467,7 @@ TEST(tensor_broadcast, via_vm) {
     expression jaxpr = get_jaxpr([](auto v) {
         return v.broadcast_in_dim({2, 3}, {1});
     }, type_t{F32, 3});
-    EXPECT_EQ(invoke_vm(jaxpr, x), (array_t{type_t{F32, 2, 3}, {1, 2, 3, 1, 2, 3}}));
+    EXPECT_EQ_ARRAY(invoke_vm(jaxpr, x), (array_t{type_t{F32, 2, 3}, {1, 2, 3, 1, 2, 3}}));
 }
 
 // ============================ reduce_sum ============================
@@ -402,25 +475,25 @@ TEST(tensor_broadcast, via_vm) {
 TEST(tensor_reduce, vector_to_scalar) {
     using namespace jax; using enum dtype_t;
     array_t x {type_t{F32, 4}, {1, 2, 3, 4}};
-    EXPECT_EQ(x.reduce_sum({0}), (array_t{type_t{F32}, {10}}));
+    EXPECT_EQ_ARRAY(x.reduce_sum({0}), (array_t{type_t{F32}, {10}}));
 }
 
 TEST(tensor_reduce, matrix_axis_0) {
     using namespace jax; using enum dtype_t;
     array_t x {type_t{F32, 2, 3}, {1, 2, 3, 4, 5, 6}};
-    EXPECT_EQ(x.reduce_sum({0}), (array_t{type_t{F32, 3}, {5, 7, 9}}));
+    EXPECT_EQ_ARRAY(x.reduce_sum({0}), (array_t{type_t{F32, 3}, {5, 7, 9}}));
 }
 
 TEST(tensor_reduce, matrix_axis_1) {
     using namespace jax; using enum dtype_t;
     array_t x {type_t{F32, 2, 3}, {1, 2, 3, 4, 5, 6}};
-    EXPECT_EQ(x.reduce_sum({1}), (array_t{type_t{F32, 2}, {6, 15}}));
+    EXPECT_EQ_ARRAY(x.reduce_sum({1}), (array_t{type_t{F32, 2}, {6, 15}}));
 }
 
 TEST(tensor_reduce, matrix_all_axes) {
     using namespace jax; using enum dtype_t;
     array_t x {type_t{F32, 2, 3}, {1, 2, 3, 4, 5, 6}};
-    EXPECT_EQ(x.reduce_sum({0, 1}), (array_t{type_t{F32}, {21}}));
+    EXPECT_EQ_ARRAY(x.reduce_sum({0, 1}), (array_t{type_t{F32}, {21}}));
 }
 
 // ============================ transpose ============================
@@ -428,14 +501,14 @@ TEST(tensor_reduce, matrix_all_axes) {
 TEST(tensor_transpose, matrix) {
     using namespace jax; using enum dtype_t;
     array_t x {type_t{F32, 2, 3}, {1, 2, 3, 4, 5, 6}};
-    EXPECT_EQ(x.transpose({1, 0}), (array_t{type_t{F32, 3, 2}, {1, 4, 2, 5, 3, 6}}));
+    EXPECT_EQ_ARRAY(x.transpose({1, 0}), (array_t{type_t{F32, 3, 2}, {1, 4, 2, 5, 3, 6}}));
 }
 
 TEST(tensor_transpose, rank3_reverse) {
     using namespace jax; using enum dtype_t;
     array_t x {type_t{F32, 2, 2, 2}, {1, 2, 3, 4, 5, 6, 7, 8}};
     // out[a][b][c] = in[c][b][a]
-    EXPECT_EQ(x.transpose({2, 1, 0}),
+    EXPECT_EQ_ARRAY(x.transpose({2, 1, 0}),
               (array_t{type_t{F32, 2, 2, 2}, {1, 5, 3, 7, 2, 6, 4, 8}}));
 }
 
@@ -446,7 +519,7 @@ TEST(tensor_dot, vector_dot) {
     array_t a {type_t{F32, 3}, {1, 2, 3}};
     array_t b {type_t{F32, 3}, {4, 5, 6}};
     // contract axis 0 of both, no free/batch -> scalar 1*4 + 2*5 + 3*6 = 32
-    EXPECT_EQ(a.dot_general(b, {0}, {0}, {}, {}), (array_t{type_t{F32}, {32}}));
+    EXPECT_EQ_ARRAY(a.dot_general(b, {0}, {0}, {}, {}), (array_t{type_t{F32}, {32}}));
 }
 
 TEST(tensor_dot, matrix_vector) {
@@ -454,7 +527,7 @@ TEST(tensor_dot, matrix_vector) {
     array_t a {type_t{F32, 2, 3}, {1, 2, 3, 4, 5, 6}};
     array_t b {type_t{F32, 3}, {7, 8, 9}};
     // contract a's axis 1 with b's axis 0 -> [2]: [50, 122]
-    EXPECT_EQ(a.dot_general(b, {1}, {0}, {}, {}), (array_t{type_t{F32, 2}, {50, 122}}));
+    EXPECT_EQ_ARRAY(a.dot_general(b, {1}, {0}, {}, {}), (array_t{type_t{F32, 2}, {50, 122}}));
 }
 
 // ============================ convert_element_type ============================
@@ -463,7 +536,7 @@ TEST(tensor_convert, f32_to_i32) {
     using namespace jax; using enum dtype_t;
     // convert only relabels the dtype; the stored values are unchanged.
     array_t x {type_t{F32, 2}, {2, 3}};
-    EXPECT_EQ(x.convert_element_type(I32), (array_t{type_t{I32, 2}, {2, 3}}));
+    EXPECT_EQ_ARRAY(x.convert_element_type(I32), (array_t{type_t{I32, 2}, {2, 3}}));
 }
 
 // ============================ elementwise (implicit broadcast) ============================
@@ -472,13 +545,13 @@ TEST(tensor_elementwise, matrix_plus_row) {
     using namespace jax; using enum dtype_t;
     array_t a {type_t{F32, 2, 3}, {1, 2, 3, 4, 5, 6}};
     array_t row {type_t{F32, 3}, {10, 20, 30}};
-    EXPECT_EQ(a + row, (array_t{type_t{F32, 2, 3}, {11, 22, 33, 14, 25, 36}}));
+    EXPECT_EQ_ARRAY(a + row, (array_t{type_t{F32, 2, 3}, {11, 22, 33, 14, 25, 36}}));
 }
 
 TEST(tensor_elementwise, scalar_times_vector) {
     using namespace jax; using enum dtype_t;
     array_t v {type_t{F32, 3}, {1, 2, 3}};
-    EXPECT_EQ(array_t{2.} * v, (array_t{type_t{F32, 3}, {2, 4, 6}}));
+    EXPECT_EQ_ARRAY(array_t{2.} * v, (array_t{type_t{F32, 3}, {2, 4, 6}}));
 }
 
 TEST(tensor_elementwise, both_operands_broadcast) {
@@ -486,14 +559,14 @@ TEST(tensor_elementwise, both_operands_broadcast) {
     // [2,1] + [1,3] -> [2,3], both operands get stretched
     array_t col {type_t{F32, 2, 1}, {1, 2}};
     array_t row {type_t{F32, 1, 3}, {10, 20, 30}};
-    EXPECT_EQ(col + row, (array_t{type_t{F32, 2, 3}, {11, 21, 31, 12, 22, 32}}));
+    EXPECT_EQ_ARRAY(col + row, (array_t{type_t{F32, 2, 3}, {11, 21, 31, 12, 22, 32}}));
 }
 
 TEST(tensor_elementwise, less_than) {
     using namespace jax; using enum dtype_t;
     array_t a {type_t{F32, 3}, {1, 2, 3}};
     array_t b {type_t{F32, 3}, {3, 2, 1}};
-    EXPECT_EQ(a < b, (array_t{type_t{F32, 3}, {1, 0, 0}}));
+    EXPECT_EQ_ARRAY(a < b, (array_t{type_t{BOOL, 3}, {1, 0, 0}}));
 }
 
 // ============================ cond (both branches) ============================
@@ -515,8 +588,8 @@ TEST(vm_cond, two_branches) {
     array_t idx0 {type_t{I32}, {0}};
     array_t idx1 {type_t{I32}, {1}};
 
-    EXPECT_EQ(invoke_vm(jaxpr, {idx0, a, b}), a + b);
-    EXPECT_EQ(invoke_vm(jaxpr, {idx1, a, b}), a * b);
+    EXPECT_EQ_ARRAY(invoke_vm(jaxpr, {idx0, a, b}), a + b);
+    EXPECT_EQ_ARRAY(invoke_vm(jaxpr, {idx1, a, b}), a * b);
 }
 
 TEST(vm_cond, three_branches) {
@@ -535,9 +608,9 @@ TEST(vm_cond, three_branches) {
     array_t a {type_t{F32, 2}, {6, 8}};
     array_t b {type_t{F32, 2}, {2, 4}};
 
-    EXPECT_EQ(invoke_vm(jaxpr, {array_t{type_t{I32}, {0}}, a, b}), a - b);
-    EXPECT_EQ(invoke_vm(jaxpr, {array_t{type_t{I32}, {1}}, a, b}), a + b);
-    EXPECT_EQ(invoke_vm(jaxpr, {array_t{type_t{I32}, {2}}, a, b}), a * b);
+    EXPECT_EQ_ARRAY(invoke_vm(jaxpr, {array_t{type_t{I32}, {0}}, a, b}), a - b);
+    EXPECT_EQ_ARRAY(invoke_vm(jaxpr, {array_t{type_t{I32}, {1}}, a, b}), a + b);
+    EXPECT_EQ_ARRAY(invoke_vm(jaxpr, {array_t{type_t{I32}, {2}}, a, b}), a * b);
 }
 
 // ============================ grad of tensor ops ============================
@@ -549,8 +622,8 @@ TEST(grad_tensor, broadcast_reduce_is_linear) {
         return jax::reduce_sum(x.broadcast_in_dim({3}, {}), {0});
     }, type_t{F32}))};
 
-    EXPECT_EQ(invoke_vm(grad_jaxpr, array_t{2.5}), array_t{3.});
-    EXPECT_EQ(invoke_vm(grad_jaxpr, array_t{-4.}), array_t{3.});
+    EXPECT_EQ_ARRAY(invoke_vm(grad_jaxpr, array_t{2.5}), array_t{3.});
+    EXPECT_EQ_ARRAY(invoke_vm(grad_jaxpr, array_t{-4.}), array_t{3.});
 }
 
 // ============================ grad via finite differences ============================
@@ -611,32 +684,32 @@ TEST(grad_closed_form, sqrt) {
     using namespace jax; using enum dtype_t;
     expression d {grad(get_jaxpr([](auto x) { return sqrt(x); }, type_t{F32}))};
     // d/dx sqrt(x) = 1 / (2 sqrt(x))
-    EXPECT_EQ(invoke_vm(d, array_t{2.5}), array_t{0.5} / sqrt(array_t{2.5}));
-    EXPECT_EQ(invoke_vm(d, array_t{0.7}), array_t{0.5} / sqrt(array_t{0.7}));
+    EXPECT_EQ_ARRAY(invoke_vm(d, array_t{2.5}), array_t{0.5} / sqrt(array_t{2.5}));
+    EXPECT_EQ_ARRAY(invoke_vm(d, array_t{0.7}), array_t{0.5} / sqrt(array_t{0.7}));
 }
 
 TEST(grad_closed_form, rsqrt) {
     using namespace jax; using enum dtype_t;
     expression d {grad(get_jaxpr([](auto x) { return rsqrt(x); }, type_t{F32}))};
     // d/dx x^{-1/2} = -1/2 x^{-3/2} = -1/2 rsqrt(x)^3
-    EXPECT_EQ(invoke_vm(d, array_t{2.5}), array_t{-0.5} * integer_pow(rsqrt(array_t{2.5}), 3));
-    EXPECT_EQ(invoke_vm(d, array_t{0.7}), array_t{-0.5} * integer_pow(rsqrt(array_t{0.7}), 3));
+    EXPECT_EQ_ARRAY(invoke_vm(d, array_t{2.5}), array_t{-0.5} * integer_pow(rsqrt(array_t{2.5}), 3));
+    EXPECT_EQ_ARRAY(invoke_vm(d, array_t{0.7}), array_t{-0.5} * integer_pow(rsqrt(array_t{0.7}), 3));
 }
 
 TEST(grad_closed_form, tanh) {
     using namespace jax; using enum dtype_t;
     expression d {grad(get_jaxpr([](auto x) { return tanh(x); }, type_t{F32}))};
     // d/dx tanh(x) = 1 - tanh(x)^2
-    EXPECT_EQ(invoke_vm(d, array_t{0.4}), array_t{1.} - tanh(array_t{0.4}) * tanh(array_t{0.4}));
-    EXPECT_EQ(invoke_vm(d, array_t{-1.2}), array_t{1.} - tanh(array_t{-1.2}) * tanh(array_t{-1.2}));
+    EXPECT_EQ_ARRAY(invoke_vm(d, array_t{0.4}), array_t{1.} - tanh(array_t{0.4}) * tanh(array_t{0.4}));
+    EXPECT_EQ_ARRAY(invoke_vm(d, array_t{-1.2}), array_t{1.} - tanh(array_t{-1.2}) * tanh(array_t{-1.2}));
 }
 
 TEST(grad_closed_form, logistic) {
     using namespace jax; using enum dtype_t;
     expression d {grad(get_jaxpr([](auto x) { return logistic(x); }, type_t{F32}))};
     // d/dx sigma(x) = sigma(x) (1 - sigma(x))
-    EXPECT_EQ(invoke_vm(d, array_t{0.4}), logistic(array_t{0.4}) * (array_t{1.} - logistic(array_t{0.4})));
-    EXPECT_EQ(invoke_vm(d, array_t{-1.2}), logistic(array_t{-1.2}) * (array_t{1.} - logistic(array_t{-1.2})));
+    EXPECT_EQ_ARRAY(invoke_vm(d, array_t{0.4}), logistic(array_t{0.4}) * (array_t{1.} - logistic(array_t{0.4})));
+    EXPECT_EQ_ARRAY(invoke_vm(d, array_t{-1.2}), logistic(array_t{-1.2}) * (array_t{1.} - logistic(array_t{-1.2})));
 }
 
 TEST(grad_closed_form, integer_pow) {
@@ -648,10 +721,10 @@ TEST(grad_closed_form, integer_pow) {
     expression d3 {grad(get_jaxpr([](auto x) { return integer_pow(x, 3); }, type_t{F32}))};
     expression d5 {grad(get_jaxpr([](auto x) { return integer_pow(x, 5); }, type_t{F32}))};
 
-    EXPECT_EQ(invoke_vm(d1, input), array_t{1.});
-    EXPECT_EQ(invoke_vm(d2, input), array_t{2.} * input);
-    EXPECT_EQ(invoke_vm(d3, input), array_t{3.} * integer_pow(input, 2));
-    EXPECT_EQ(invoke_vm(d5, input), array_t{5.} * integer_pow(input, 4));
+    EXPECT_EQ_ARRAY(invoke_vm(d1, input), array_t{1.});
+    EXPECT_EQ_ARRAY(invoke_vm(d2, input), array_t{2.} * input);
+    EXPECT_EQ_ARRAY(invoke_vm(d3, input), array_t{3.} * integer_pow(input, 2));
+    EXPECT_EQ_ARRAY(invoke_vm(d5, input), array_t{5.} * integer_pow(input, 4));
 }
 
 // ============================ grad of new binary ops ============================
@@ -663,25 +736,25 @@ TEST(grad_closed_form, pow) {
     expression d {grad(get_jaxpr([](auto x, auto y) { return pow(x, y); }, type_t{F32}, type_t{F32}))};
     // dz/dx = y x^{y-1}, dz/dy = x^y ln(x)
     std::vector expected { y * pow(x, y - array_t{1.}), pow(x, y) * log(x) };
-    EXPECT_EQ(invoke_vm<false>(d, {x, y}), expected);
+    EXPECT_EQ_ARRAY(invoke_vm<false>(d, {x, y}), expected);
 }
 
 TEST(grad_closed_form, max) {
     using namespace jax; using enum dtype_t;
     expression d {grad(get_jaxpr([](auto x, auto y) { return max(x, y); }, type_t{F32}, type_t{F32}))};
     // Gradient flows to the larger operand; ties are routed to the second (y).
-    EXPECT_EQ(invoke_vm<false>(d, {array_t{5.}, array_t{2.}}), (std::vector<array_t>{1., 0.}));
-    EXPECT_EQ(invoke_vm<false>(d, {array_t{2.}, array_t{5.}}), (std::vector<array_t>{0., 1.}));
-    EXPECT_EQ(invoke_vm<false>(d, {array_t{3.}, array_t{3.}}), (std::vector<array_t>{0., 1.}));
+    EXPECT_EQ_ARRAY(invoke_vm<false>(d, {array_t{5.}, array_t{2.}}), (std::vector<array_t>{1., 0.}));
+    EXPECT_EQ_ARRAY(invoke_vm<false>(d, {array_t{2.}, array_t{5.}}), (std::vector<array_t>{0., 1.}));
+    EXPECT_EQ_ARRAY(invoke_vm<false>(d, {array_t{3.}, array_t{3.}}), (std::vector<array_t>{0., 1.}));
 }
 
 TEST(grad_closed_form, min) {
     using namespace jax; using enum dtype_t;
     expression d {grad(get_jaxpr([](auto x, auto y) { return min(x, y); }, type_t{F32}, type_t{F32}))};
     // Gradient flows to the smaller operand; ties are routed to the second (y).
-    EXPECT_EQ(invoke_vm<false>(d, {array_t{2.}, array_t{5.}}), (std::vector<array_t>{1., 0.}));
-    EXPECT_EQ(invoke_vm<false>(d, {array_t{5.}, array_t{2.}}), (std::vector<array_t>{0., 1.}));
-    EXPECT_EQ(invoke_vm<false>(d, {array_t{3.}, array_t{3.}}), (std::vector<array_t>{0., 1.}));
+    EXPECT_EQ_ARRAY(invoke_vm<false>(d, {array_t{2.}, array_t{5.}}), (std::vector<array_t>{1., 0.}));
+    EXPECT_EQ_ARRAY(invoke_vm<false>(d, {array_t{5.}, array_t{2.}}), (std::vector<array_t>{0., 1.}));
+    EXPECT_EQ_ARRAY(invoke_vm<false>(d, {array_t{3.}, array_t{3.}}), (std::vector<array_t>{0., 1.}));
 }
 
 // ============================ grad of tensor ops via FDM ============================
