@@ -708,7 +708,11 @@ jaxpr_tracer jaxpr_builder::ones(size_t shape, dtype_t dtype) {
     return full(shape, 1, dtype);
 }
 
-expression&& jaxpr_builder::get_jaxpr() {
+expression&& jaxpr_builder::get_jaxpr(bool optimise_IR) {
+    if (optimise_IR) {
+        jaxpr.eliminate_common_subexpressions();
+        jaxpr.eliminate_dead_code();
+    }
     return std::move(jaxpr);
 }
 

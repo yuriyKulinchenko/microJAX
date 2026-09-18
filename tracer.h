@@ -112,7 +112,7 @@ public:
         return register_tracer(jax::type_t{dtype, shape...});
     }
 
-    [[nodiscard]] jax::expression&& get_jaxpr();
+    [[nodiscard]] jax::expression&& get_jaxpr(bool optimise_IR=true);
     jax::expression jaxpr;
 };
 
@@ -195,7 +195,6 @@ jax::expression get_jaxpr(F&& f, Types&&... types) {
     jaxpr_builder builder {};
     builder.register_output(f(builder.register_tracer(types)...));
     auto jaxpr = builder.get_jaxpr();
-    jaxpr.eliminate_dead_code();
     return jaxpr;
 }
 

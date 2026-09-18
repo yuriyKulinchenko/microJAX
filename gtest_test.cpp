@@ -903,3 +903,65 @@ TEST(grad_tensor_fdm, scatter) {
     expression jaxpr = get_jaxpr(f, type_t{F32}, type_t{F32}, type_t{F32});
     check_grad_fdm(jaxpr, {array_t{0.5}, array_t{1.1}, array_t{-0.3}});
 }
+
+// ============================ common subexpression elimination ============================
+// Build deliberately redundant IR, optimise it, and assert it shrinks while the VM output
+// stays identical before and after.
+
+TEST(cse, duplicate_output) {
+    using namespace jax; using enum dtype_t;
+
+    jaxpr_builder builder{};
+    auto x = builder.register_tracer(F32);
+    auto y = builder.register_tracer(F32);
+    auto f = [](auto a, auto b) { return sin(a) + cos(a) - a * b / exp(b); };
+    builder.register_output(f(x, y));
+    builder.register_output(f(x, y));
+
+    expression unoptimised = builder.jaxpr;
+    expression optimised = builder.get_jaxpr();
+
+    EXPECT_LT(optimised.equations.size(), unoptimised.equations.size());
+
+    array_t xv {1.3}, yv {0.7};
+    EXPECT_EQ_ARRAY(invoke_vm<false>(unoptimised, {xv, yv}),
+                    invoke_vm<false>(optimised, {xv, yv}));
+}
+
+TEST(cse, nested_redundancy) {
+    using namespace jax; using enum dtype_t;
+
+    jaxpr_builder builder{};
+    auto x = builder.register_tracer(F32);
+    auto g = [](auto v) { return sin(v) + cos(v); };
+    auto a = g(x);
+    auto b = g(x);
+    builder.register_output(g(a) + g(b));
+
+    expression unoptimised = builder.jaxpr;
+    expression optimised = builder.get_jaxpr();
+
+    EXPECT_LT(optimised.equations.size(), unoptimised.equations.size());
+
+    array_t xv {0.9};
+    EXPECT_EQ_ARRAY(invoke_vm(unoptimised, xv), invoke_vm(optimised, xv));
+}
+
+TEST(cse, commutativity) {
+    using namespace jax; using enum dtype_t;
+
+    jaxpr_builder builder{};
+    auto x = builder.register_tracer(F32);
+    auto y = builder.register_tracer(F32);
+    builder.register_output((x + y) + max(x, y));
+    builder.register_output((y + x) + max(y, x));
+
+    expression unoptimised = builder.jaxpr;
+    expression optimised = builder.get_jaxpr();
+
+    EXPECT_LT(optimised.equations.size(), unoptimised.equations.size());
+
+    array_t xv {1.5}, yv {2.5};
+    EXPECT_EQ_ARRAY(invoke_vm<false>(unoptimised, {xv, yv}),
+                    invoke_vm<false>(optimised, {xv, yv}));
+}

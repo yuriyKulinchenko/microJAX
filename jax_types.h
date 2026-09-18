@@ -100,6 +100,7 @@ namespace jax {
         var_t fresh_var(type_t type);
 
         void eliminate_dead_code();
+        void eliminate_common_subexpressions();
 
         size_t new_var_id();
 

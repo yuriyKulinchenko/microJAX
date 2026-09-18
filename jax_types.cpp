@@ -173,7 +173,21 @@ namespace jax {
         instance.apply_dead_code_elimination();
     }
 
-    bool expression::operator==(const expression& other) const = default;
+    void expression::eliminate_common_subexpressions() {
+        CSE_class instance {*this};
+        instance.apply_common_subexpression_elimination();
+    }
+
+    bool expression::operator==(const expression& other) const {
+        return constvars == other.constvars
+            && invars == other.invars
+            && outvals == other.outvals
+            && equations == other.equations
+            && var_id == other.var_id
+            && std::ranges::equal(consts, other.consts, [](const array_t& a, const array_t& b) {
+                return a.get_type() == b.get_type() && a.get_value() == b.get_value();
+            });
+    }
 
 }
 

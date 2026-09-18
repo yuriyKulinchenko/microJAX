@@ -25,10 +25,32 @@ void gather_example();
 void scatter_gather_example();
 void concatenate_example();
 void slice_example();
+void CSE_example();
 
 int main() {
-    slice_example();
+    CSE_example();
     return 0;
+}
+
+void CSE_example() {
+    using namespace jax;
+    using enum dtype_t;
+
+    jaxpr_builder builder {};
+
+    auto x = builder.register_tracer(F32, 100, 32, 50);
+    auto y = builder.register_tracer(F32, 100, 32, 50);
+
+    auto f = [](const jaxpr_tracer& x, const jaxpr_tracer& y) -> jaxpr_tracer {
+        return sin(x) + cos(x) - x * y / exp(y);
+    };
+
+    builder.register_output(f(x, y));
+    builder.register_output(f(x, y));
+
+    std::cout << "Original expression:\n" << builder.jaxpr;
+    std::cout << "Optimised expression:\n" << builder.get_jaxpr();
+
 }
 
 void slice_example() {

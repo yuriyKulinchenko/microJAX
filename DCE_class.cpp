@@ -3,6 +3,7 @@
 //
 
 #include "DCE_class.h"
+#include "helper.h"
 
 #include <unordered_set>
 
@@ -117,7 +118,8 @@ in the 'equation_key' class, which provides hashing for all supported operations
 */
 
 static bool is_commutative_op(const primitive_op op) {
-    return op == primitive_op::ADD || op == primitive_op::MUL;
+    using enum primitive_op;
+    return op == ADD || op == MUL || op == MAX || op == MIN || op == EQ || op == NE;
 }
 
 static bool value_less(const value& a, const value& b) {
@@ -147,7 +149,7 @@ struct equation_key {
     }
 
     bool operator==(const equation_key& other) const {
-        return op == other.op && std::ranges::equal(operands, other.operands);
+        return op == other.op && params == other.params && std::ranges::equal(operands, other.operands);
     }
 
     primitive_op op;
@@ -156,9 +158,6 @@ struct equation_key {
 };
 
 namespace std {
-
-    // TODO: this does not use multihash, the dedicated utility for this in helper.
-    // TODO: equality and hashing of equation_key do not yet consider params.
 
     template<>
     struct std::hash<literal_t> {
@@ -181,11 +180,7 @@ namespace std {
     template<>
     struct std::hash<equation_key> {
         size_t operator()(const equation_key& key) const noexcept {
-            size_t final_hash = std::hash<size_t>{}(static_cast<size_t>(key.op));
-            for (const auto& operand: key.operands) {
-                final_hash ^= std::hash<value>{}(operand) + 31 + (final_hash << 6) + (final_hash >> 2);
-            }
-            return final_hash;
+            return ::multihash(key.op, key.operands, key.params);
         }
     };
 }
@@ -218,6 +213,19 @@ void CSE_class::apply_common_subexpression_elimination() {
         // Goal is to have std::vector of operand_hashes:
 
         path_compress(eq.get_input());
+
+        switch (eq.get_op()) {
+            using enum primitive_op;
+            case COND:
+                for (auto& branch: std::get<cond_params>(eq.get_params()).branches) {
+                    branch.eliminate_common_subexpressions();
+                }
+                break;
+            case SCAN:
+                std::get<scan_params>(eq.get_params()).jaxpr.eliminate_common_subexpressions();
+                break;
+            default: break;
+        }
 
         equation_key key {eq.get_op(), eq.get_params(), eq.get_input()};
         if (auto it = cse_map.find(key); it == cse_map.end()) {
