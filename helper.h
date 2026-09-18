@@ -408,4 +408,12 @@ static bool double_eq(double x, double y) {
     return std::abs(x - y) < epsilon;
 }
 
+// Fairly crude implementation:
+inline size_t multihash(const std::span<const size_t> items, size_t seed) {
+    for (const size_t item: items) {
+        seed ^= item + 31 + (seed << 6) + (seed >> 2);
+    }
+    return seed;
+}
+
 #endif //HELPER_H

@@ -15,9 +15,14 @@ namespace jax {
 
     var_t::var_t(size_t id, type_t type): id(id), type(std::move(type)) {}
 
-    size_t var_t::get_id() const {
+    const size_t& var_t::get_id() const {
         return id;
     }
+
+    size_t &var_t::get_id() {
+        return id;
+    }
+
 
     void var_t::set_id(size_t new_id) {
         id = new_id;
@@ -47,6 +52,10 @@ namespace jax {
         return std::get<var_t>(variant_);
     }
 
+    var_t &value::get_var() {
+        return std::get<var_t>(variant_);
+    }
+
     dtype_t value::get_dtype() const {
         return std::visit([](auto& x){return x.get_dtype();}, variant_);
     }
@@ -63,6 +72,14 @@ namespace jax {
             return std::get<var_t>(variant_).get_type();
         }
         return type_t{std::get<literal_t>(variant_).get_dtype(), literal_t::get_shape()};
+    }
+
+    bool var_t::operator==(const var_t& other) const {
+        return id == other.id;
+    }
+
+    bool value::operator==(const value& other) const {
+        return variant_ == other.variant_;
     }
 
     const std::vector<value> &equation::get_input() const {

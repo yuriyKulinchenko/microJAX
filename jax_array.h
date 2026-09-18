@@ -89,6 +89,8 @@ namespace jax {
         [[nodiscard]] double get_value() const;
         [[nodiscard]] static const std::vector<size_t>& get_shape();
 
+        bool operator==(const literal_t& other) const = default;
+
     private:
         dtype_t dtype;
         double value;

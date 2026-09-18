@@ -95,3 +95,141 @@ void DCE_class::apply_dead_code_elimination() {
     equations.erase(equations.begin() + place_index, equations.end());
 }
 
+// Efficiently represents a single equation key when performing CSE:
+
+/*
+
+Plan for common subexpression elimination:
+
+CSE is performed bottom up, which is equivalent to a topological traversal order over the expression DAG.
+Each equation in the jaxpr has a cannonical form, obtained by calling 'find'. For instance, the cannonical
+form of %x is find(%x). If %x is unique, then find(%x) = %x: otherwise, find(%x) is the earliest occurence
+of a variable equal to %x.
+
+An equation of the form [%y = op %x1 ... %xn] is identified as a common subexpression based on whether
+[op find(%x1) ... find(%xn)] has already been seen. The existence of [op find(%x1) ... find(%xn)] is determined
+through a hash map lookup.
+
+The hashmap lookup has to be quite detailed: If 'op' is commutative, the hash should reflect this. This culminates
+in the 'equation_key' class, which provides hashing for all supported operations, based on these requirements.
+
+
+*/
+
+static bool is_commutative_op(const primitive_op op) {
+    return op == primitive_op::ADD || op == primitive_op::MUL;
+}
+
+static bool value_less(const value& a, const value& b) {
+    const bool a_literal = a.is<literal_t>();
+    const bool b_literal = b.is<literal_t>();
+    if (a_literal != b_literal) {
+        return a_literal; // literals order before variables
+    }
+    if (a_literal) {
+        const literal_t& la = a.get_literal();
+        const literal_t& lb = b.get_literal();
+        if (la.get_dtype() != lb.get_dtype()) {
+            return static_cast<size_t>(la.get_dtype()) < static_cast<size_t>(lb.get_dtype());
+        }
+        return la.get_value() < lb.get_value();
+    }
+    return a.get_var().get_id() < b.get_var().get_id();
+}
+
+struct equation_key {
+    equation_key(primitive_op op, const params_variant& params, std::span<value> operands):
+    op(op), params(params), operands(operands) {
+
+        if (is_commutative_op(op)) {
+            std::ranges::sort(this->operands, value_less);
+        }
+    }
+
+    bool operator==(const equation_key& other) const {
+        return op == other.op && std::ranges::equal(operands, other.operands);
+    }
+
+    primitive_op op;
+    const params_variant& params;
+    std::span<value> operands;
+};
+
+namespace std {
+
+    // TODO: this does not use multihash, the dedicated utility for this in helper.
+    // TODO: equality and hashing of equation_key do not yet consider params.
+
+    template<>
+    struct std::hash<literal_t> {
+        size_t operator()(const literal_t& literal) const noexcept {
+            return std::hash<size_t>{}(static_cast<size_t>(literal.get_dtype()))
+                ^ std::hash<double>{}(literal.get_value());
+        }
+    };
+
+    template<>
+    struct std::hash<value> {
+        size_t operator()(const value& val) const noexcept {
+            if (val.is<literal_t>()) {
+                return std::hash<literal_t>{}(val.get_literal());
+            }
+            return std::hash<size_t>{}(val.get_var().get_id());
+        }
+    };
+
+    template<>
+    struct std::hash<equation_key> {
+        size_t operator()(const equation_key& key) const noexcept {
+            size_t final_hash = std::hash<size_t>{}(static_cast<size_t>(key.op));
+            for (const auto& operand: key.operands) {
+                final_hash ^= std::hash<value>{}(operand) + 31 + (final_hash << 6) + (final_hash >> 2);
+            }
+            return final_hash;
+        }
+    };
+}
+
+CSE_class::CSE_class(expression& expr): input_expr(expr) {}
+
+void CSE_class::apply_common_subexpression_elimination() {
+    std::unordered_map<size_t, size_t> find_map {};
+    std::unordered_map<equation_key, std::span<const var_t>> cse_map {};
+
+    auto find = [&](const size_t var_id) -> size_t {
+        auto it = find_map.find(var_id);
+        if (it != find_map.end()) {
+            return it->second;
+        }
+        return var_id;
+    };
+
+    auto path_compress = [&](std::span<value> values) -> void {
+        for (auto& val: values) {
+            if (val.is<var_t>()) {
+                size_t& var_id = val.get_var().get_id();
+                var_id = find(var_id);
+            }
+        }
+    };
+
+    for (auto& eq: input_expr.equations) {
+        // Recursively hash, and then call 'find' on all input variables.
+        // Goal is to have std::vector of operand_hashes:
+
+        path_compress(eq.get_input());
+
+        equation_key key {eq.get_op(), eq.get_params(), eq.get_input()};
+        if (auto it = cse_map.find(key); it == cse_map.end()) {
+            // Subexpression is unique - register equation output in CSE map:
+            cse_map[key] = eq.get_output();
+        } else {
+            // Subexpression already exists - map the outputs back:
+            for (const auto& [original, replacement]: std::views::zip(eq.get_output(), it->second)) {
+                find_map[original.get_id()] = replacement.get_id();
+            }
+        }
+    }
+
+    path_compress(input_expr.outvals);
+}

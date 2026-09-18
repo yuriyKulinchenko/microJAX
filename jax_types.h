@@ -39,13 +39,16 @@ namespace jax {
     public:
         explicit var_t(size_t id, type_t type);
 
-        [[nodiscard]] size_t get_id() const;
+        [[nodiscard]] const size_t& get_id() const;
+        [[nodiscard]] size_t& get_id();
 
         void set_id(size_t new_id);
 
         [[nodiscard]] const type_t& get_type() const;
         [[nodiscard]] const std::vector<size_t>& get_shape() const;
         [[nodiscard]] dtype_t get_dtype() const;
+
+        bool operator==(const var_t& other) const;
 
     private:
         type_t type;
@@ -69,9 +72,12 @@ namespace jax {
 
         [[nodiscard]] const literal_t& get_literal() const;
         [[nodiscard]] const var_t& get_var() const;
+        [[nodiscard]] var_t& get_var();
         [[nodiscard]] dtype_t get_dtype() const;
         [[nodiscard]] const std::vector<size_t>& get_shape() const;
         [[nodiscard]] type_t get_type() const;
+
+        bool operator==(const value& other) const;
 
     private:
        std::variant<literal_t, var_t> variant_;
