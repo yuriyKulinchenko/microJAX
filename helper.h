@@ -11,6 +11,7 @@
 #include <format>
 #include <iostream>
 #include <functional>
+#include <typeinfo>
 
 #define RED     "\033[31m"
 #define GREEN   "\033[32m"
@@ -413,6 +414,26 @@ inline size_t multihash(const std::span<const size_t> items, size_t seed) {
     for (const size_t item: items) {
         seed ^= item + 31 + (seed << 6) + (seed >> 2);
     }
+    return seed;
+}
+
+template<typename T>
+size_t hash_element(const T& item) {
+    if constexpr (std::ranges::range<T>) {
+        size_t seed = typeid(T).hash_code();
+        for (const auto& element: item) {
+            seed ^= hash_element(element) + 31 + (seed << 6) + (seed >> 2);
+        }
+        return seed;
+    } else {
+        return std::hash<T>{}(item);
+    }
+}
+
+template<typename... Ts>
+size_t multihash(const Ts&... items) {
+    size_t seed = 0;
+    ((seed ^= hash_element(items) + 31 + (seed << 6) + (seed >> 2)), ...);
     return seed;
 }
 

@@ -102,10 +102,13 @@ namespace jax {
         void eliminate_dead_code();
 
         size_t new_var_id();
+
+        bool operator==(const expression& other) const;
     };
 
     struct transpose_params {
         std::vector<size_t> permutation;
+        bool operator==(const transpose_params& other) const = default;
     };
 
     struct dot_general_params {
@@ -113,31 +116,38 @@ namespace jax {
         std::vector<size_t> right_contract;
         std::vector<size_t> left_batch;
         std::vector<size_t> right_batch;
+        bool operator==(const dot_general_params& other) const = default;
     };
 
     struct reduce_sum_params {
         std::vector<size_t> axes;
+        bool operator==(const reduce_sum_params& other) const = default;
     };
 
     struct reduce_max_params {
         std::vector<size_t> axes;
+        bool operator==(const reduce_max_params& other) const = default;
     };
 
     struct reduce_min_params {
         std::vector<size_t> axes;
+        bool operator==(const reduce_min_params& other) const = default;
     };
 
     struct broadcast_in_dim_params {
         std::vector<size_t> shape;
         std::vector<size_t> broadcast_dimensions;
+        bool operator==(const broadcast_in_dim_params& other) const = default;
     };
 
     struct convert_element_type_params {
         dtype_t new_dtype;
+        bool operator==(const convert_element_type_params& other) const = default;
     };
 
     struct cond_params {
         std::vector<expression> branches;
+        bool operator==(const cond_params& other) const = default;
     };
 
     struct scan_params {
@@ -146,28 +156,34 @@ namespace jax {
         size_t num_consts;
         size_t num_carry;
         bool reverse;
+        bool operator==(const scan_params& other) const = default;
     };
 
     struct integer_pow_params {
         size_t y;
+        bool operator==(const integer_pow_params& other) const = default;
     };
 
     struct concatenate_params {
         size_t dimension;
+        bool operator==(const concatenate_params& other) const = default;
     };
 
     struct reshape_params {
         std::vector<size_t> new_sizes;
+        bool operator==(const reshape_params& other) const = default;
     };
 
     struct slice_params {
         std::vector<size_t> start_indices;
         std::vector<size_t> limit_indices;
         std::vector<size_t> strides;
+        bool operator==(const slice_params& other) const = default;
     };
 
     struct pad_params {
         std::vector<std::array<size_t, 3>> padding_config; // (low, high, interior) list
+        bool operator==(const pad_params& other) const = default;
     };
 
     using params_variant = std::variant<
@@ -206,6 +222,7 @@ namespace jax {
         [[nodiscard]] var_t& get_output(size_t i);
         [[nodiscard]] params_variant& get_params();
 
+        bool operator==(const equation& other) const = default;
 
     private:
         std::vector<value> input;
@@ -213,6 +230,28 @@ namespace jax {
         primitive_op op;
         params_variant params;
     };
+}
+
+#define PARAMS_HASH_LIST(X) \
+    X(transpose_params, p.permutation) \
+    X(dot_general_params, p.left_contract, p.right_contract, p.left_batch, p.right_batch) \
+    X(reduce_sum_params, p.axes) \
+    X(reduce_max_params, p.axes) \
+    X(reduce_min_params, p.axes) \
+    X(broadcast_in_dim_params, p.shape, p.broadcast_dimensions) \
+    X(convert_element_type_params, p.new_dtype) \
+    X(cond_params, p.branches.size()) \
+    X(scan_params, p.length, p.num_consts, p.num_carry, p.reverse) \
+    X(integer_pow_params, p.y) \
+    X(concatenate_params, p.dimension) \
+    X(reshape_params, p.new_sizes) \
+    X(slice_params, p.start_indices, p.limit_indices, p.strides) \
+    X(pad_params, p.padding_config)
+
+namespace std {
+#define X(T, ...) template<> struct hash<jax::T> { size_t operator()(const jax::T&) const noexcept; };
+    PARAMS_HASH_LIST(X)
+#undef X
 }
 
 #endif //JAXPR_TYPES_H

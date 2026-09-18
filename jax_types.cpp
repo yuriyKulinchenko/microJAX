@@ -1,5 +1,6 @@
 #include "jax_types.h"
 #include "DCE_class.h"
+#include "helper.h"
 
 namespace jax {
 
@@ -172,4 +173,10 @@ namespace jax {
         instance.apply_dead_code_elimination();
     }
 
+    bool expression::operator==(const expression& other) const = default;
+
 }
+
+#define X(T, ...) size_t std::hash<jax::T>::operator()(const jax::T& p) const noexcept { return ::multihash(__VA_ARGS__); }
+    PARAMS_HASH_LIST(X)
+#undef X
