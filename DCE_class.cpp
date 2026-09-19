@@ -264,6 +264,7 @@ void TRS_class::apply_term_rewrite() {
     // Unlike CSE, this maps var_id to var_id | literal
     std::unordered_map<size_t, std::variant<size_t, literal_t>> find_map {};
     std::vector<equation> new_equations {}; new_equations.reserve(input_expr.equations.size());
+    std::vector<equation> equation_buffer {};
 
     size_t fresh_var_id = input_expr.var_id;
     auto fresh_var = [&](type_t type) -> var_t {
@@ -294,7 +295,8 @@ void TRS_class::apply_term_rewrite() {
         } else {
             var_t broadcast_var = fresh_var(var.get_type());
             find_map[var.get_id()] = broadcast_var.get_id();
-            new_equations.emplace_back(
+            id_equation_map[broadcast_var.get_id()] = new_equations.size();
+            equation_buffer.emplace_back(
                 std::vector{value{literal_t{var.get_dtype(), x}}},
                 std::vector{broadcast_var},
                 primitive_op::BROADCAST_IN_DIM,
@@ -378,42 +380,32 @@ void TRS_class::apply_term_rewrite() {
             */
 
             case ADD: {
-                // TODO: use rewrite_values helper
                 // %z = add %x %y
-
-                var_t& z = eq.get_output(0);
-                value& x = eq.get_input(0);
-                value& y = eq.get_input(1);
 
                 // add(x, 0) -> x, add(0, x) -> x:
 
-                // First, check trivial case of arguments being 0 literals:
-                if (x.is<literal_t>() && x.get_literal().get_value() == 0) {
-                    // If x is a zero literal, then bind z to y:
-                    bind(z, y);
-                    break;
-                }
+                auto rewrite_values = [&](const value& x, const value& y, var_t& z) -> bool {
+                    if (x.is<literal_t>()) {
+                        if (x.get_literal().get_value() == 0) {
+                            // If x is a zero literal, then bind z to y:
+                            bind(z, y);
+                            return true;
+                        }
+                        return false;
+                    }
 
-                if (y.is<literal_t>() && y.get_literal().get_value() == 0) {
-                    bind(z, x);
-                    break;
-                }
-
-                if (x.is<var_t>()) {
                     if (auto x_result = trace_literal_broadcast(x.get_var().get_id())) {
                         if (x_result->first.get_value() == 0) {
                             bind(z, y);
+                            return true;
                         }
                     }
-                }
+                    return false;
+                };
 
-                if (y.is<var_t>()) {
-                    if (auto y_result = trace_literal_broadcast(y.get_var().get_id())) {
-                        if (y_result->first.get_value() == 0) {
-                            bind(z, x);
-                        }
-                    }
-                }
+                value& x = eq.get_input(0);
+                value& y = eq.get_input(1);
+                if (var_t& z = eq.get_output(0); !rewrite_values(x, y, z)) rewrite_values(y, x, z);
 
                 break;
             }
@@ -429,7 +421,7 @@ void TRS_class::apply_term_rewrite() {
                 auto rewrite_values = [&](const value& x, const value& y, var_t& z) -> bool {
                     if (x.is<literal_t>()) {
                         if (x.get_literal().get_value() == 1) {
-                            bind(z, x);
+                            bind(z, y);
                             return true;
                         }
 
@@ -442,7 +434,7 @@ void TRS_class::apply_term_rewrite() {
                             // Have to emit a new instruction:
                             var_t neg_var = fresh_var(z.get_type());
                             bind(z, value{neg_var});
-                            new_equations.emplace_back(
+                            equation_buffer.emplace_back(
                                 std::vector{y},
                                 std::vector{std::move(neg_var)},
                                 NEG
@@ -453,7 +445,7 @@ void TRS_class::apply_term_rewrite() {
                     }
 
                     // x is a variable:
-                    if (auto x_result = trace_literal_broadcast(x.get_var().get_id())) {
+                    if (const auto x_result = trace_literal_broadcast(x.get_var().get_id())) {
                         if (x_result->first.get_value() == 1) {
                             bind(z, y);
                             return true;
@@ -467,7 +459,7 @@ void TRS_class::apply_term_rewrite() {
                         if (x_result->first.get_value() == -1) {
                             var_t neg_var = fresh_var(z.get_type());
                             bind(z, value{neg_var});
-                            new_equations.emplace_back(
+                            equation_buffer.emplace_back(
                                 std::vector{y},
                                 std::vector{std::move(neg_var)},
                                 NEG
@@ -487,8 +479,14 @@ void TRS_class::apply_term_rewrite() {
 
             default: break;
         }
+        // Flush equation_buffer:
+        for (auto& temp_eq: equation_buffer) {
+            new_equations.push_back(std::move(temp_eq));
+        }
+        equation_buffer.clear();
     }
 
     input_expr.equations = std::move(new_equations);
+    input_expr.var_id = fresh_var_id;
     path_compress(input_expr.outvals);
 }
