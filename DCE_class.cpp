@@ -259,7 +259,7 @@ is attempted.
 
 */
 
-void TRS_class::apply_term_rewrite() {
+void TRS_class::apply_term_rewrite(bool fast_math) {
     std::unordered_map<size_t, size_t> id_equation_map {};
     // Unlike CSE, this maps var_id to var_id | literal
     std::unordered_map<size_t, std::variant<size_t, literal_t>> find_map {};
@@ -358,13 +358,6 @@ void TRS_class::apply_term_rewrite() {
             using enum primitive_op;
 
             /*
-
-            sub(x, 0) -> x
-            div(x, 1) -> x
-            mul(x, -1) -> neg(x), mul(-1, x) -> neg(x)
-            sub(0, x) -> neg(x)
-            neg(neg(x)) -> x
-            integer_pow(x, 1) -> x, pow(x, 1) -> x
 
             reshape(reshape(x, _), s) -> reshape(x, s)
             reshape(x, shape(x)) -> x
@@ -474,6 +467,162 @@ void TRS_class::apply_term_rewrite() {
                 const value& x = eq.get_input(0);
                 const value& y = eq.get_input(1);
                 if (var_t& z = eq.get_output(0); !rewrite_values(x, y, z)) rewrite_values(y, x, z);
+                break;
+            }
+
+            case SUB : {
+                // %z = sub %x %y
+
+                // sub(x, 0) -> x,
+                // sub(0, x) -> neg(x):
+
+                value& x = eq.get_input(0);
+                value& y = eq.get_input(1);
+                var_t& z = eq.get_output(0);
+
+                if (y.is<literal_t>()) {
+                    if (y.get_literal().get_value() == 0) {
+                        bind(z, x);
+                        break;
+                    }
+
+                } else {
+                    if (auto y_result = trace_literal_broadcast(y.get_var().get_id())) {
+                        if (y_result->first.get_value() == 0) {
+                            bind(z, x);
+                            break;
+                        }
+                    }
+                }
+
+                if (x.is<literal_t>()) {
+                    if (x.get_literal().get_value() == 0) {
+                        var_t neg_var = fresh_var(z.get_type());
+                        bind(z, value{neg_var});
+                        equation_buffer.emplace_back(
+                            std::vector{y},
+                            std::vector{std::move(neg_var)},
+                            NEG
+                        );
+                        break;
+                    }
+                } else {
+                    if (auto x_result = trace_literal_broadcast(x.get_var().get_id())) {
+                        if (x_result->first.get_value() == 0) {
+                            var_t neg_var = fresh_var(z.get_type());
+                            bind(z, value{neg_var});
+                            equation_buffer.emplace_back(
+                                std::vector{y},
+                                std::vector{std::move(neg_var)},
+                                NEG
+                            );
+                            break;
+                        }
+                    }
+                }
+
+                break;
+            }
+
+            case DIV: {
+                // %z = div %x %y
+
+                // div(x, 1) -> x:
+
+                value& x = eq.get_input(0);
+                value& y = eq.get_input(1);
+                var_t& z = eq.get_output(0);
+
+                if (y.is<literal_t>()) {
+                    if (y.get_literal().get_value() == 1) {
+                        bind(z, x);
+                        break;
+                    }
+                } else {
+                    if (auto y_result = trace_literal_broadcast(y.get_var().get_id())) {
+                        if (y_result->first.get_value() == 1) {
+                            bind(z, x);
+                            break;
+                        }
+                    }
+                }
+
+                break;
+            }
+
+            case NEG: {
+                // %z = neg %x
+
+                // neg(neg(x)) -> x:
+
+                value& x = eq.get_input(0);
+                var_t& z = eq.get_output(0);
+
+                if (x.is<var_t>()) {
+                    if (auto inner = trace(x.get_var().get_id(), [](equation& e) -> bool {
+                        return e.get_op() == NEG;
+                    })) {
+                        bind(z, new_equations[*inner].get_input(0));
+                        break;
+                    }
+                }
+
+                break;
+            }
+
+            case INTEGER_POW: {
+                // %z = integer_pow[y] %x
+
+                // integer_pow(x, 1) -> x:
+
+                value& x = eq.get_input(0);
+                var_t& z = eq.get_output(0);
+
+                if (std::get<integer_pow_params>(eq.get_params()).y == 1) {
+                    bind(z, x);
+                }
+
+                break;
+            }
+
+            case POW: {
+                // %z = pow %x %y
+
+                // pow(x, 1) -> x,
+                // pow(x, n) -> integer_pow(x, n) if n is a non-negative integer literal:
+
+                value& x = eq.get_input(0);
+                value& y = eq.get_input(1);
+                var_t& z = eq.get_output(0);
+
+                std::optional<double> exponent;
+                if (y.is<literal_t>()) {
+                    exponent = y.get_literal().get_value();
+                } else if (auto y_result = trace_literal_broadcast(y.get_var().get_id())) {
+                    exponent = y_result->first.get_value();
+                }
+
+                if (exponent) {
+                    if (*exponent == 1) {
+                        bind(z, x);
+                        break;
+                    }
+
+                    if (*exponent >= 0) {
+                        if (auto n = static_cast<size_t>(*exponent); static_cast<double>(n) == *exponent) {
+                            var_t pow_var = fresh_var(z.get_type());
+                            bind(z, value{pow_var});
+                            equation_buffer.emplace_back(
+                                std::vector{x},
+                                std::vector{std::move(pow_var)},
+                                INTEGER_POW,
+                                integer_pow_params{n}
+                            );
+                            break;
+                        }
+                    }
+                }
+
                 break;
             }
 

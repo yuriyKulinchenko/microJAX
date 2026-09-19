@@ -24,7 +24,7 @@ private:
 class TRS_class {
 public:
     explicit TRS_class(jax::expression& expr);
-    void apply_term_rewrite();
+    void apply_term_rewrite(bool fast_math=true);
 
 private:
     jax::expression& input_expr;
