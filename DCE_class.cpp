@@ -243,6 +243,14 @@ void CSE_class::apply_common_subexpression_elimination() {
 
 TRS_class::TRS_class(expression& expr): input_expr(expr) {}
 
+using value_variant = std::variant<size_t, literal_t>;
+static value_variant to_value_variant(const value& value) {
+    if (value.is<literal_t>()) {
+        return value.get_literal();
+    } else {
+        return value.get_var().get_id();
+    }
+}
 
 /*
 
@@ -262,7 +270,7 @@ is attempted.
 void TRS_class::apply_term_rewrite(bool fast_math) {
     std::unordered_map<size_t, size_t> id_equation_map {};
     // Unlike CSE, this maps var_id to var_id | literal
-    std::unordered_map<size_t, std::variant<size_t, literal_t>> find_map {};
+    std::unordered_map<size_t, value_variant> find_map {};
     std::vector<equation> new_equations {}; new_equations.reserve(input_expr.equations.size());
     std::vector<equation> equation_buffer {};
 
@@ -271,7 +279,7 @@ void TRS_class::apply_term_rewrite(bool fast_math) {
         return var_t{fresh_var_id++, std::move(type)};
     };
 
-    auto find = [&](value& val) -> std::variant<size_t, literal_t> {
+    auto find = [&](value& val) -> value_variant {
         if (val.is<literal_t>()) return val.get_literal();
         const var_t& val_var = val.get_var();
         if (const auto it = find_map.find(val_var.get_id()); it != find_map.end()) {
@@ -281,11 +289,7 @@ void TRS_class::apply_term_rewrite(bool fast_math) {
     };
 
     auto bind = [&](var_t& var, const value& bound_val) -> void {
-        if (bound_val.is<literal_t>()) {
-            find_map[var.get_id()] = bound_val.get_literal();
-        } else {
-            find_map[var.get_id()] = bound_val.get_var().get_id();
-        }
+        find_map[var.get_id()] = to_value_variant(bound_val);
     };
 
     // Broadcasts if necessary:
@@ -295,7 +299,7 @@ void TRS_class::apply_term_rewrite(bool fast_math) {
         } else {
             var_t broadcast_var = fresh_var(var.get_type());
             find_map[var.get_id()] = broadcast_var.get_id();
-            id_equation_map[broadcast_var.get_id()] = new_equations.size();
+            id_equation_map[broadcast_var.get_id()] = new_equations.size() + equation_buffer.size();
             equation_buffer.emplace_back(
                 std::vector{value{literal_t{var.get_dtype(), x}}},
                 std::vector{broadcast_var},
@@ -329,20 +333,95 @@ void TRS_class::apply_term_rewrite(bool fast_math) {
         return std::nullopt;
     };
 
-    auto trace_literal_broadcast = [&](size_t var_id) ->
-    std::optional<std::pair<const literal_t&, const broadcast_in_dim_params&>> {
+
+    auto trace_broadcast = [&](size_t var_id) ->
+    std::optional<std::pair<value&, const broadcast_in_dim_params&>> {
+
         std::optional<size_t> eq_index = trace(var_id, [](equation& eq) -> bool {
-            return eq.get_op() == primitive_op::BROADCAST_IN_DIM && eq.get_input(0).is<literal_t>();
+            return eq.get_op() == primitive_op::BROADCAST_IN_DIM;
         });
 
-        if (eq_index) {
-            auto& eq = new_equations[*eq_index];
-            const auto& literal = eq.get_input(0).get_literal();
-            const auto& params = std::get<broadcast_in_dim_params>(eq.get_params());
-            return std::pair<const literal_t&, const broadcast_in_dim_params&> {literal, params};
+        if (!eq_index) return std::nullopt;
+
+
+        auto& eq = new_equations[*eq_index];
+        const auto& params = std::get<broadcast_in_dim_params>(eq.get_params());
+        return std::pair<value&, const broadcast_in_dim_params&> {
+            eq.get_input(0), params};
+    };
+
+    // Special case of trace_broadcast:
+    auto trace_literal_broadcast = [&](size_t var_id) ->
+    std::optional<std::pair<literal_t, const broadcast_in_dim_params&>> {
+
+        auto result = trace_broadcast(var_id);
+        if (!result) return std::nullopt;
+        if (result->first.is<var_t>()) return std::nullopt;
+        return std::pair<literal_t, const broadcast_in_dim_params&>(result->first.get_literal(), result->second);
+    };
+
+
+    /*
+
+    If y = f(bc(x1), ..., bc(xN)), then y = bc(x1, ..., xN) provided that f is elementwise,
+    and 'bc' is the same broadcast applied to each element.
+
+    resolve_broadcast will be invoked on all elementwise ops if no other simplification is possible.
+    resole_broadcast also assumes a single output.
+
+    */
+
+    auto resolve_broadcast = [&](equation& eq) -> bool {
+        using namespace std::views;
+        // First, check to make sure that the first argument is a broadcast:
+
+        if (eq.get_input(0).is<literal_t>()) return false;
+        auto result = trace_broadcast(eq.get_input(0).get_var().get_id());
+        if (!result) return false;
+
+        broadcast_in_dim_params params = result->second;
+        const std::vector<size_t>& pre_broadcast_shape = result->first.get_shape();
+
+        std::vector pre_broadcast_invals {result->first};
+
+        if (!std::ranges::all_of(eq.get_input() | drop(1), [&](const value& val) -> bool {
+            if (val.is<literal_t>()) return false;
+            auto val_result = trace_broadcast(val.get_var().get_id());
+            if (!val_result) return false;
+            // If there exists a result, compare it against params:
+            if (val_result->second.broadcast_dimensions != params.broadcast_dimensions) return false;
+            if (val_result->first.get_shape() != pre_broadcast_shape) return false;
+            pre_broadcast_invals.push_back(val_result->first);
+            return true;
+        })) {
+            return false;
         }
 
-        return std::nullopt;
+        // y = bc(f(x1, ..., xN)):
+
+        var_t& y = eq.get_output(0);
+
+        var_t f_var = fresh_var(type_t{y.get_dtype(), pre_broadcast_shape});
+
+        equation_buffer.emplace_back(
+            std::move(pre_broadcast_invals),
+            std::vector{f_var},
+            eq.get_op(),
+            eq.get_params()
+        );
+
+        var_t bc_var = fresh_var(y.get_type());
+
+        id_equation_map[bc_var.get_id()] = new_equations.size() + equation_buffer.size();
+        equation_buffer.emplace_back(
+            std::vector{value{f_var}},
+            std::vector{bc_var},
+            primitive_op::BROADCAST_IN_DIM,
+            std::move(params)
+        );
+
+        bind(y, value{bc_var});
+        return true;
     };
 
     for (auto& old_eq: input_expr.equations) {
@@ -398,7 +477,11 @@ void TRS_class::apply_term_rewrite(bool fast_math) {
 
                 value& x = eq.get_input(0);
                 value& y = eq.get_input(1);
-                if (var_t& z = eq.get_output(0); !rewrite_values(x, y, z)) rewrite_values(y, x, z);
+                var_t& z = eq.get_output(0);
+
+                if (rewrite_values(x, y, z)) break;
+                if (rewrite_values(y, x, z)) break;
+                resolve_broadcast(eq);
 
                 break;
             }
@@ -427,6 +510,7 @@ void TRS_class::apply_term_rewrite(bool fast_math) {
                             // Have to emit a new instruction:
                             var_t neg_var = fresh_var(z.get_type());
                             bind(z, value{neg_var});
+                            id_equation_map[neg_var.get_id()] = new_equations.size() + equation_buffer.size();
                             equation_buffer.emplace_back(
                                 std::vector{y},
                                 std::vector{std::move(neg_var)},
@@ -452,6 +536,7 @@ void TRS_class::apply_term_rewrite(bool fast_math) {
                         if (x_result->first.get_value() == -1) {
                             var_t neg_var = fresh_var(z.get_type());
                             bind(z, value{neg_var});
+                            id_equation_map[neg_var.get_id()] = new_equations.size() + equation_buffer.size();
                             equation_buffer.emplace_back(
                                 std::vector{y},
                                 std::vector{std::move(neg_var)},
@@ -464,9 +549,14 @@ void TRS_class::apply_term_rewrite(bool fast_math) {
                     return false;
                 };
 
-                const value& x = eq.get_input(0);
-                const value& y = eq.get_input(1);
-                if (var_t& z = eq.get_output(0); !rewrite_values(x, y, z)) rewrite_values(y, x, z);
+                value& x = eq.get_input(0);
+                value& y = eq.get_input(1);
+                var_t& z = eq.get_output(0);
+
+                if (rewrite_values(x, y, z)) break;
+                if (rewrite_values(y, x, z)) break;
+                resolve_broadcast(eq);
+
                 break;
             }
 
@@ -499,6 +589,7 @@ void TRS_class::apply_term_rewrite(bool fast_math) {
                     if (x.get_literal().get_value() == 0) {
                         var_t neg_var = fresh_var(z.get_type());
                         bind(z, value{neg_var});
+                        id_equation_map[neg_var.get_id()] = new_equations.size() + equation_buffer.size();
                         equation_buffer.emplace_back(
                             std::vector{y},
                             std::vector{std::move(neg_var)},
@@ -511,6 +602,7 @@ void TRS_class::apply_term_rewrite(bool fast_math) {
                         if (x_result->first.get_value() == 0) {
                             var_t neg_var = fresh_var(z.get_type());
                             bind(z, value{neg_var});
+                            id_equation_map[neg_var.get_id()] = new_equations.size() + equation_buffer.size();
                             equation_buffer.emplace_back(
                                 std::vector{y},
                                 std::vector{std::move(neg_var)},
@@ -521,6 +613,7 @@ void TRS_class::apply_term_rewrite(bool fast_math) {
                     }
                 }
 
+                resolve_broadcast(eq);
                 break;
             }
 
@@ -547,6 +640,8 @@ void TRS_class::apply_term_rewrite(bool fast_math) {
                     }
                 }
 
+                resolve_broadcast(eq);
+
                 break;
             }
 
@@ -567,6 +662,7 @@ void TRS_class::apply_term_rewrite(bool fast_math) {
                     }
                 }
 
+                resolve_broadcast(eq);
                 break;
             }
 
@@ -580,7 +676,10 @@ void TRS_class::apply_term_rewrite(bool fast_math) {
 
                 if (std::get<integer_pow_params>(eq.get_params()).y == 1) {
                     bind(z, x);
+                    break;
                 }
+
+                resolve_broadcast(eq);
 
                 break;
             }
@@ -623,6 +722,8 @@ void TRS_class::apply_term_rewrite(bool fast_math) {
                     }
                 }
 
+                resolve_broadcast(eq);
+
                 break;
             }
 
@@ -631,19 +732,19 @@ void TRS_class::apply_term_rewrite(bool fast_math) {
 
                 // log(exp(x)) -> x (fast_math):
 
-                if (!fast_math) break;
-
                 value& x = eq.get_input(0);
                 var_t& z = eq.get_output(0);
 
-                if (x.is<var_t>()) {
+                if (fast_math && x.is<var_t>()) {
                     if (auto inner = trace(x.get_var().get_id(), [](equation& e) -> bool {
-                        return e.get_op() == primitive_op::EXP;
+                        return e.get_op() == EXP;
                     })) {
                         bind(z, new_equations[*inner].get_input(0));
                         break;
                     }
                 }
+
+                resolve_broadcast(eq);
 
                 break;
             }
@@ -653,12 +754,10 @@ void TRS_class::apply_term_rewrite(bool fast_math) {
 
                 // exp(log(x)) -> x (fast_math):
 
-                if (!fast_math) break;
-
                 value& x = eq.get_input(0);
                 var_t& z = eq.get_output(0);
 
-                if (x.is<var_t>()) {
+                if (fast_math && x.is<var_t>()) {
                     if (auto inner = trace(x.get_var().get_id(), [](equation& e) -> bool {
                         return e.get_op() == LOG;
                     })) {
@@ -667,6 +766,28 @@ void TRS_class::apply_term_rewrite(bool fast_math) {
                     }
                 }
 
+                resolve_broadcast(eq);
+
+                break;
+            }
+
+            case SIN:
+            case COS:
+            case SQRT:
+            case RSQRT:
+            case TANH:
+            case LOGISTIC:
+            case MAX:
+            case MIN:
+            case CONVERT_ELEMENT_TYPE:
+            case SELECT:
+            case EQ:
+            case NE:
+            case LT:
+            case LE:
+            case GT:
+            case GE: {
+                resolve_broadcast(eq);
                 break;
             }
 

@@ -27,10 +27,27 @@ void concatenate_example();
 void slice_example();
 void CSE_example();
 void TRS_example();
+void resolve_broadcast_example();
 
 int main() {
-    TRS_example();
+    resolve_broadcast_example();
     return 0;
+}
+
+void resolve_broadcast_example() {
+    using namespace jax;
+    using enum dtype_t;
+
+    jaxpr_builder builder {};
+
+    auto x = builder.register_tracer(F32);
+    auto y = builder.register_tracer(F32);
+
+    builder.register_output(broadcast_in_dim(x, {3, 3, 3}, {}) + broadcast_in_dim(y, {3, 3, 3}, {}));
+
+    std::cout << "Original expression:\n" << builder.jaxpr;
+    std::cout << "Optimised expression:\n" << builder.get_jaxpr();
+
 }
 
 void TRS_example() {
