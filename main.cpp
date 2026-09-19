@@ -26,10 +26,27 @@ void scatter_gather_example();
 void concatenate_example();
 void slice_example();
 void CSE_example();
+void TRS_example();
 
 int main() {
-    CSE_example();
+    TRS_example();
     return 0;
+}
+
+void TRS_example() {
+    using namespace jax;
+    using enum dtype_t;
+
+    jaxpr_builder builder {};
+
+    auto x = builder.register_tracer(F32, 100, 32, 50);
+    auto y = builder.zeros({100, 32, 50});
+
+    builder.register_output(x + y);
+
+    std::cout << "Original expression:\n" << builder.jaxpr;
+    std::cout << "Optimised expression:\n" << builder.get_jaxpr();
+
 }
 
 void CSE_example() {

@@ -46,15 +46,24 @@ namespace jax {
     value::value(var_t var): variant_(std::move(var)) {}
 
     const literal_t& value::get_literal() const {
-        return std::get<literal_t>(variant_);
+        if constexpr (checked_variant_access) {
+            if (!is<literal_t>()) throw std::logic_error("Error: get_literal() called on a value holding a var_t");
+        }
+        return *std::get_if<literal_t>(&variant_);
     }
 
     const var_t& value::get_var() const {
-        return std::get<var_t>(variant_);
+        if constexpr (checked_variant_access) {
+            if (!is<var_t>()) throw std::logic_error("Error: get_var() called on a value holding a literal_t");
+        }
+        return *std::get_if<var_t>(&variant_);
     }
 
     var_t &value::get_var() {
-        return std::get<var_t>(variant_);
+        if constexpr (checked_variant_access) {
+            if (!is<var_t>()) throw std::logic_error("Error: get_var() called on a value holding a literal_t");
+        }
+        return *std::get_if<var_t>(&variant_);
     }
 
     dtype_t value::get_dtype() const {
@@ -176,6 +185,11 @@ namespace jax {
     void expression::eliminate_common_subexpressions() {
         CSE_class instance {*this};
         instance.apply_common_subexpression_elimination();
+    }
+
+    void expression::rewrite_terms() {
+        TRS_class instance {*this};
+        instance.apply_term_rewrite();
     }
 
     bool expression::operator==(const expression& other) const {

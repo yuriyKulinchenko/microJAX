@@ -192,8 +192,7 @@ void CSE_class::apply_common_subexpression_elimination() {
     std::unordered_map<equation_key, std::span<const var_t>> cse_map {};
 
     auto find = [&](const size_t var_id) -> size_t {
-        auto it = find_map.find(var_id);
-        if (it != find_map.end()) {
+        if (const auto it = find_map.find(var_id); it != find_map.end()) {
             return it->second;
         }
         return var_id;
@@ -236,6 +235,191 @@ void CSE_class::apply_common_subexpression_elimination() {
             for (const auto& [original, replacement]: std::views::zip(eq.get_output(), it->second)) {
                 find_map[original.get_id()] = replacement.get_id();
             }
+        }
+    }
+
+    path_compress(input_expr.outvals);
+}
+
+TRS_class::TRS_class(expression& expr): input_expr(expr) {}
+
+
+/*
+
+Like CSE, TRS will be done bottom up relative to the expression DAG. Unlike CSE, TRS is composed of multiple
+entirely distinct cases, each with very different rewrite semantics. This means there is no unifying strucutre
+for each rewrite.
+
+In general, when an equation is visited, a term rewrite rule may be selected based on the corresponding primitive op.
+At the end of each term rewrite, the semantics of the underlying jaxpr are entirely preserved. Unused variables are
+NOT cleaned up, this is only ever done by the DCE pass.
+
+Term rewrite rules are attempted based on a pre-defined order. If one term rewrite rule fails, the next one
+is attempted.
+
+*/
+
+void TRS_class::apply_term_rewrite() {
+    std::unordered_map<size_t, equation*> id_equation_map {};
+    std::unordered_map<size_t, value*> find_map {}; // Unlike CSE, this maps var_id to concrete value
+    std::unordered_map<equation_key, std::span<const var_t>> cse_map {};
+
+    auto find = [&](value& val) -> value& {
+        if (val.is<literal_t>()) return val;
+        const var_t& val_var = val.get_var();
+        if (const auto it = find_map.find(val_var.get_id()); it != find_map.end()) {
+            return *it->second;
+        }
+        return val;
+    };
+
+    auto path_compress = [&](std::span<value> values) -> void {
+        for (value& val: values) {
+            val = find(val);
+        }
+    };
+
+    // If %y = f %x, then trace(%y, predicate) := [%y = f %x] if equation satisfies predicate, otherwise nullptr
+    auto trace = [&]<typename F>(size_t var_id, F&& predicate) -> equation* {
+        if (auto it = id_equation_map.find(var_id);
+            it != id_equation_map.end() && predicate(*it->second)) {
+            return it->second;
+        }
+        return nullptr;
+    };
+
+    // If %y = broadcast %x, then trace(%y) = [%y = broadcast %x], otherwise nullptr
+    auto trace_broadcast = [&](size_t var_id) -> equation* {
+        return trace(var_id, [](equation& eq) -> bool {
+            return eq.get_op() == primitive_op::BROADCAST_IN_DIM;
+        });
+    };
+
+    auto trace_literal_broadcast = [&](size_t var_id) ->
+    std::optional<std::pair<const literal_t&, const broadcast_in_dim_params&>> {
+        equation* eq = trace(var_id, [](equation& eq) -> bool {
+            return eq.get_op() == primitive_op::BROADCAST_IN_DIM && eq.get_input(0).is<literal_t>();
+        });
+
+        if (eq) {
+            const auto& literal = eq->get_input(0).get_literal();
+            const auto& params = std::get<broadcast_in_dim_params>(eq->get_params());
+            return std::pair<const literal_t&, const broadcast_in_dim_params&> {literal, params};
+        }
+
+        return std::nullopt;
+    };
+
+    for (auto& eq: input_expr.equations) {
+        for (auto& outvar: eq.get_output()) {
+            id_equation_map[outvar.get_id()] = &eq;
+        }
+        path_compress(eq.get_input());
+        switch (eq.get_op()) {
+            using enum primitive_op;
+
+            /*
+
+            sub(x, 0) -> x
+            div(x, 1) -> x
+            mul(x, -1) -> neg(x), mul(-1, x) -> neg(x)
+            sub(0, x) -> neg(x)
+            neg(neg(x)) -> x
+            integer_pow(x, 1) -> x, pow(x, 1) -> x
+
+            reshape(reshape(x, _), s) -> reshape(x, s)
+            reshape(x, shape(x)) -> x
+            transpose(transpose(x, p), q) -> transpose(x, q∘p), and transpose(x, identity) -> x
+            broadcast(broadcast(x)) -> broadcast(x) (compose to the outer shape)
+            broadcast_in_dim(x, shape(x), identity_dims) -> x
+            convert_element_type(x, dtype(x)) -> x
+            concatenate([x]) -> x (single operand)
+            slice(x, full-range, stride 1) -> x
+            pad(x, k, all-zero config) -> x
+            reduce_*(x, {}) -> x (empty axis set)
+
+            */
+
+            case ADD: {
+                // %z = add %x %y
+
+                var_t& z = eq.get_output(0);
+                value& x = eq.get_input(0);
+                value& y = eq.get_input(1);
+
+                // add(x, 0) -> x, add(0, x) -> x:
+
+                // First, check trivial case of arguments being 0 literals:
+                if (x.is<literal_t>() && x.get_literal().get_value() == 0) {
+                    // If x is a zero literal, then bind z to y:
+                    find_map[z.get_id()] = &y;
+                    break;
+                }
+
+                if (y.is<literal_t>() && y.get_literal().get_value() == 0) {
+                    find_map[z.get_id()] = &x;
+                    break;
+                }
+
+                if (x.is<var_t>()) {
+                    if (auto x_result = trace_literal_broadcast(x.get_var().get_id())) {
+                        if (x_result->first.get_value() == 0) {
+                            find_map[z.get_id()] = &y;
+                        }
+                    }
+                }
+
+                if (y.is<var_t>()) {
+                    if (auto y_result = trace_literal_broadcast(y.get_var().get_id())) {
+                        if (y_result->first.get_value() == 0) {
+                            find_map[z.get_id()] = &x;
+                        }
+                    }
+                }
+
+                break;
+            }
+
+            case MUL: {
+                // %z = mul %x %y
+
+                var_t& z = eq.get_output(0);
+                value& x = eq.get_input(0);
+                value& y = eq.get_input(1);
+
+                // mul(x, 1) -> x, mul(1, x) -> x,
+                // mul(x, -1) -> neg(x), mul(-1, x) -> neg(x):
+
+                if (x.is<literal_t>() && x.get_literal().get_value() == 1) {
+                    find_map[z.get_id()] = &y;
+                    break;
+                }
+
+                if (y.is<literal_t>() && y.get_literal().get_value() == 1) {
+                    find_map[z.get_id()] = &x;
+                    break;
+                }
+
+                if (x.is<var_t>()) {
+                    if (auto x_result = trace_literal_broadcast(x.get_var().get_id())) {
+                        if (x_result->first.get_value() == 1) {
+                            find_map[z.get_id()] = &y;
+                        }
+                    }
+                }
+
+                if (y.is<var_t>()) {
+                    if (auto y_result = trace_literal_broadcast(y.get_var().get_id())) {
+                        if (y_result->first.get_value() == 1) {
+                            find_map[z.get_id()] = &x;
+                        }
+                    }
+                }
+
+                break;
+            }
+
+            default: break;
         }
     }
 

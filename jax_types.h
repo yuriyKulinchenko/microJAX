@@ -35,6 +35,8 @@ namespace jax {
 
     std::string_view to_string(primitive_op op);
 
+    constexpr bool checked_variant_access = true;
+
     class var_t {
     public:
         explicit var_t(size_t id, type_t type);
@@ -101,6 +103,7 @@ namespace jax {
 
         void eliminate_dead_code();
         void eliminate_common_subexpressions();
+        void rewrite_terms();
 
         size_t new_var_id();
 

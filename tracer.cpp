@@ -712,6 +712,7 @@ expression&& jaxpr_builder::get_jaxpr(bool optimise_IR) {
     if (optimise_IR) {
         jaxpr.eliminate_common_subexpressions();
         jaxpr.eliminate_dead_code();
+        jaxpr.rewrite_terms();
     }
     return std::move(jaxpr);
 }
