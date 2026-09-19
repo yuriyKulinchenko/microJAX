@@ -260,50 +260,63 @@ is attempted.
 */
 
 void TRS_class::apply_term_rewrite() {
-    std::unordered_map<size_t, equation*> id_equation_map {};
-    std::unordered_map<size_t, value*> find_map {}; // Unlike CSE, this maps var_id to concrete value
+    std::unordered_map<size_t, size_t> id_equation_map {};
+    // Unlike CSE, this maps var_id to var_id | literal
+    std::unordered_map<size_t, std::variant<size_t, literal_t>> find_map {};
     std::unordered_map<equation_key, std::span<const var_t>> cse_map {};
+    std::vector<equation> new_equations {}; new_equations.reserve(input_expr.equations.size());
 
-    auto find = [&](value& val) -> value& {
-        if (val.is<literal_t>()) return val;
+    auto find = [&](value& val) -> std::variant<size_t, literal_t> {
+        if (val.is<literal_t>()) return val.get_literal();
         const var_t& val_var = val.get_var();
         if (const auto it = find_map.find(val_var.get_id()); it != find_map.end()) {
-            return *it->second;
+            return it->second;
         }
-        return val;
+        return val.get_var().get_id();
+    };
+
+    auto bind = [&](var_t& var, const value& bound_val) -> void {
+        if (bound_val.is<literal_t>()) {
+            find_map[var.get_id()] = bound_val.get_literal();
+        } else {
+            find_map[var.get_id()] = bound_val.get_var().get_id();
+        }
     };
 
     auto path_compress = [&](std::span<value> values) -> void {
         for (value& val: values) {
-            val = find(val);
+            if (val.is<literal_t>()) continue;
+            auto find_result = find(val);
+            var_t& val_var = val.get_var();
+            if (std::holds_alternative<size_t>(find_result)) {
+                // var_id case:
+                val_var.set_id(*std::get_if<size_t>(&find_result));
+            } else {
+                val = value{*std::get_if<literal_t>(&find_result)};
+            }
         }
     };
 
     // If %y = f %x, then trace(%y, predicate) := [%y = f %x] if equation satisfies predicate, otherwise nullptr
-    auto trace = [&]<typename F>(size_t var_id, F&& predicate) -> equation* {
-        if (auto it = id_equation_map.find(var_id);
-            it != id_equation_map.end() && predicate(*it->second)) {
-            return it->second;
+    // trace returns the equation index
+    auto trace = [&]<typename F>(const size_t var_id, F&& predicate) -> std::optional<size_t>  {
+        if (const auto it = id_equation_map.find(var_id); it != id_equation_map.end()) {
+            auto& eq = new_equations[it->second];
+            if (predicate(eq)) return it->second;
         }
-        return nullptr;
-    };
-
-    // If %y = broadcast %x, then trace(%y) = [%y = broadcast %x], otherwise nullptr
-    auto trace_broadcast = [&](size_t var_id) -> equation* {
-        return trace(var_id, [](equation& eq) -> bool {
-            return eq.get_op() == primitive_op::BROADCAST_IN_DIM;
-        });
+        return std::nullopt;
     };
 
     auto trace_literal_broadcast = [&](size_t var_id) ->
     std::optional<std::pair<const literal_t&, const broadcast_in_dim_params&>> {
-        equation* eq = trace(var_id, [](equation& eq) -> bool {
+        std::optional<size_t> eq_index = trace(var_id, [](equation& eq) -> bool {
             return eq.get_op() == primitive_op::BROADCAST_IN_DIM && eq.get_input(0).is<literal_t>();
         });
 
-        if (eq) {
-            const auto& literal = eq->get_input(0).get_literal();
-            const auto& params = std::get<broadcast_in_dim_params>(eq->get_params());
+        if (eq_index) {
+            auto& eq = new_equations[*eq_index];
+            const auto& literal = eq.get_input(0).get_literal();
+            const auto& params = std::get<broadcast_in_dim_params>(eq.get_params());
             return std::pair<const literal_t&, const broadcast_in_dim_params&> {literal, params};
         }
 
@@ -312,9 +325,12 @@ void TRS_class::apply_term_rewrite() {
 
     for (auto& eq: input_expr.equations) {
         for (auto& outvar: eq.get_output()) {
-            id_equation_map[outvar.get_id()] = &eq;
+            id_equation_map[outvar.get_id()] = new_equations.size();
         }
-        path_compress(eq.get_input());
+
+        new_equations.push_back(eq);
+        path_compress(new_equations.back().get_input());
+
         switch (eq.get_op()) {
             using enum primitive_op;
 
@@ -352,19 +368,19 @@ void TRS_class::apply_term_rewrite() {
                 // First, check trivial case of arguments being 0 literals:
                 if (x.is<literal_t>() && x.get_literal().get_value() == 0) {
                     // If x is a zero literal, then bind z to y:
-                    find_map[z.get_id()] = &y;
+                    bind(z, y);
                     break;
                 }
 
                 if (y.is<literal_t>() && y.get_literal().get_value() == 0) {
-                    find_map[z.get_id()] = &x;
+                    bind(z, x);
                     break;
                 }
 
                 if (x.is<var_t>()) {
                     if (auto x_result = trace_literal_broadcast(x.get_var().get_id())) {
                         if (x_result->first.get_value() == 0) {
-                            find_map[z.get_id()] = &y;
+                            bind(z, y);
                         }
                     }
                 }
@@ -372,7 +388,7 @@ void TRS_class::apply_term_rewrite() {
                 if (y.is<var_t>()) {
                     if (auto y_result = trace_literal_broadcast(y.get_var().get_id())) {
                         if (y_result->first.get_value() == 0) {
-                            find_map[z.get_id()] = &x;
+                            bind(z, x);
                         }
                     }
                 }
@@ -391,19 +407,19 @@ void TRS_class::apply_term_rewrite() {
                 // mul(x, -1) -> neg(x), mul(-1, x) -> neg(x):
 
                 if (x.is<literal_t>() && x.get_literal().get_value() == 1) {
-                    find_map[z.get_id()] = &y;
+                    bind(z, y);
                     break;
                 }
 
                 if (y.is<literal_t>() && y.get_literal().get_value() == 1) {
-                    find_map[z.get_id()] = &x;
+                    bind(z, x);
                     break;
                 }
 
                 if (x.is<var_t>()) {
                     if (auto x_result = trace_literal_broadcast(x.get_var().get_id())) {
                         if (x_result->first.get_value() == 1) {
-                            find_map[z.get_id()] = &y;
+                            bind(z, y);
                         }
                     }
                 }
@@ -411,7 +427,7 @@ void TRS_class::apply_term_rewrite() {
                 if (y.is<var_t>()) {
                     if (auto y_result = trace_literal_broadcast(y.get_var().get_id())) {
                         if (y_result->first.get_value() == 1) {
-                            find_map[z.get_id()] = &x;
+                            bind(z, x);
                         }
                     }
                 }
@@ -423,5 +439,6 @@ void TRS_class::apply_term_rewrite() {
         }
     }
 
+    input_expr.equations = std::move(new_equations);
     path_compress(input_expr.outvals);
 }
