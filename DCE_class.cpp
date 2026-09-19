@@ -418,7 +418,7 @@ void TRS_class::apply_term_rewrite(bool fast_math) {
                             return true;
                         }
 
-                        if (x.get_literal().get_value() == 0) {
+                        if (fast_math && x.get_literal().get_value() == 0) {
                             bind_constant(z, 0);
                             return true;
                         }
@@ -444,7 +444,7 @@ void TRS_class::apply_term_rewrite(bool fast_math) {
                             return true;
                         }
 
-                        if (x_result->first.get_value() == 0) {
+                        if (fast_math && x_result->first.get_value() == 0) {
                             bind_constant(z, 0);
                             return true;
                         }
@@ -620,6 +620,50 @@ void TRS_class::apply_term_rewrite(bool fast_math) {
                             );
                             break;
                         }
+                    }
+                }
+
+                break;
+            }
+
+            case LOG: {
+                // %z = log %x
+
+                // log(exp(x)) -> x (fast_math):
+
+                if (!fast_math) break;
+
+                value& x = eq.get_input(0);
+                var_t& z = eq.get_output(0);
+
+                if (x.is<var_t>()) {
+                    if (auto inner = trace(x.get_var().get_id(), [](equation& e) -> bool {
+                        return e.get_op() == primitive_op::EXP;
+                    })) {
+                        bind(z, new_equations[*inner].get_input(0));
+                        break;
+                    }
+                }
+
+                break;
+            }
+
+            case EXP: {
+                // %z = exp %x
+
+                // exp(log(x)) -> x (fast_math):
+
+                if (!fast_math) break;
+
+                value& x = eq.get_input(0);
+                var_t& z = eq.get_output(0);
+
+                if (x.is<var_t>()) {
+                    if (auto inner = trace(x.get_var().get_id(), [](equation& e) -> bool {
+                        return e.get_op() == LOG;
+                    })) {
+                        bind(z, new_equations[*inner].get_input(0));
+                        break;
                     }
                 }
 
