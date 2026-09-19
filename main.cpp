@@ -42,7 +42,7 @@ void TRS_example() {
     auto x = builder.register_tracer(F32, 100, 32, 50);
     auto y = builder.zeros({100, 32, 50});
 
-    builder.register_output(x + y);
+    builder.register_output(-1 * x + y);
 
     std::cout << "Original expression:\n" << builder.jaxpr;
     std::cout << "Optimised expression:\n" << builder.get_jaxpr();

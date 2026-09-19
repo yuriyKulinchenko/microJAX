@@ -263,8 +263,12 @@ void TRS_class::apply_term_rewrite() {
     std::unordered_map<size_t, size_t> id_equation_map {};
     // Unlike CSE, this maps var_id to var_id | literal
     std::unordered_map<size_t, std::variant<size_t, literal_t>> find_map {};
-    std::unordered_map<equation_key, std::span<const var_t>> cse_map {};
     std::vector<equation> new_equations {}; new_equations.reserve(input_expr.equations.size());
+
+    size_t fresh_var_id = input_expr.var_id;
+    auto fresh_var = [&](type_t type) -> var_t {
+        return var_t{fresh_var_id++, std::move(type)};
+    };
 
     auto find = [&](value& val) -> std::variant<size_t, literal_t> {
         if (val.is<literal_t>()) return val.get_literal();
@@ -280,6 +284,22 @@ void TRS_class::apply_term_rewrite() {
             find_map[var.get_id()] = bound_val.get_literal();
         } else {
             find_map[var.get_id()] = bound_val.get_var().get_id();
+        }
+    };
+
+    // Broadcasts if necessary:
+    auto bind_constant = [&](var_t& var, const double x) -> void {
+        if (var.get_shape().empty()) {
+            find_map[var.get_id()] = literal_t{var.get_dtype(), x};
+        } else {
+            var_t broadcast_var = fresh_var(var.get_type());
+            find_map[var.get_id()] = broadcast_var.get_id();
+            new_equations.emplace_back(
+                std::vector{value{literal_t{var.get_dtype(), x}}},
+                std::vector{broadcast_var},
+                primitive_op::BROADCAST_IN_DIM,
+                broadcast_in_dim_params{var.get_shape(), {}}
+            );
         }
     };
 
@@ -323,15 +343,16 @@ void TRS_class::apply_term_rewrite() {
         return std::nullopt;
     };
 
-    for (auto& eq: input_expr.equations) {
-        for (auto& outvar: eq.get_output()) {
+    for (auto& old_eq: input_expr.equations) {
+        for (auto& outvar: old_eq.get_output()) {
             id_equation_map[outvar.get_id()] = new_equations.size();
         }
 
-        new_equations.push_back(eq);
+        new_equations.push_back(old_eq);
         path_compress(new_equations.back().get_input());
+        auto& eq = new_equations.back(); // This is NOT stable
 
-        switch (eq.get_op()) {
+        switch (old_eq.get_op()) {
             using enum primitive_op;
 
             /*
@@ -357,6 +378,7 @@ void TRS_class::apply_term_rewrite() {
             */
 
             case ADD: {
+                // TODO: use rewrite_values helper
                 // %z = add %x %y
 
                 var_t& z = eq.get_output(0);
@@ -399,39 +421,67 @@ void TRS_class::apply_term_rewrite() {
             case MUL: {
                 // %z = mul %x %y
 
-                var_t& z = eq.get_output(0);
-                value& x = eq.get_input(0);
-                value& y = eq.get_input(1);
-
                 // mul(x, 1) -> x, mul(1, x) -> x,
+                // mul(x, 0) -> 0, mul(0, x) -> 0,
                 // mul(x, -1) -> neg(x), mul(-1, x) -> neg(x):
 
-                if (x.is<literal_t>() && x.get_literal().get_value() == 1) {
-                    bind(z, y);
-                    break;
-                }
+                // Returns whether rewrite happened:
+                auto rewrite_values = [&](const value& x, const value& y, var_t& z) -> bool {
+                    if (x.is<literal_t>()) {
+                        if (x.get_literal().get_value() == 1) {
+                            bind(z, x);
+                            return true;
+                        }
 
-                if (y.is<literal_t>() && y.get_literal().get_value() == 1) {
-                    bind(z, x);
-                    break;
-                }
+                        if (x.get_literal().get_value() == 0) {
+                            bind_constant(z, 0);
+                            return true;
+                        }
 
-                if (x.is<var_t>()) {
+                        if (x.get_literal().get_value() == -1) {
+                            // Have to emit a new instruction:
+                            var_t neg_var = fresh_var(z.get_type());
+                            bind(z, value{neg_var});
+                            new_equations.emplace_back(
+                                std::vector{y},
+                                std::vector{std::move(neg_var)},
+                                NEG
+                            );
+                            return true;
+                        }
+                        return false;
+                    }
+
+                    // x is a variable:
                     if (auto x_result = trace_literal_broadcast(x.get_var().get_id())) {
                         if (x_result->first.get_value() == 1) {
                             bind(z, y);
+                            return true;
+                        }
+
+                        if (x_result->first.get_value() == 0) {
+                            bind_constant(z, 0);
+                            return true;
+                        }
+
+                        if (x_result->first.get_value() == -1) {
+                            var_t neg_var = fresh_var(z.get_type());
+                            bind(z, value{neg_var});
+                            new_equations.emplace_back(
+                                std::vector{y},
+                                std::vector{std::move(neg_var)},
+                                NEG
+                            );
+                            return true;
                         }
                     }
-                }
 
-                if (y.is<var_t>()) {
-                    if (auto y_result = trace_literal_broadcast(y.get_var().get_id())) {
-                        if (y_result->first.get_value() == 1) {
-                            bind(z, x);
-                        }
-                    }
-                }
+                    return false;
+                };
 
+                const value& x = eq.get_input(0);
+                const value& y = eq.get_input(1);
+                if (var_t& z = eq.get_output(0); !rewrite_values(x, y, z)) rewrite_values(y, x, z);
                 break;
             }
 
