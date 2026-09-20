@@ -424,6 +424,21 @@ void TRS_class::apply_term_rewrite(bool fast_math) {
         return true;
     };
 
+    auto fold_unary = [&](equation& eq, auto&& op) -> bool {
+        const value& x = eq.get_input(0);
+        if (!x.is<literal_t>()) return false;
+        bind_constant(eq.get_output(0), op(x.get_literal().get_value()));
+        return true;
+    };
+
+    auto fold_binary = [&](equation& eq, auto&& op) -> bool {
+        const value& x = eq.get_input(0);
+        const value& y = eq.get_input(1);
+        if (!x.is<literal_t>() || !y.is<literal_t>()) return false;
+        bind_constant(eq.get_output(0), op(x.get_literal().get_value(), y.get_literal().get_value()));
+        return true;
+    };
+
     for (auto& old_eq: input_expr.equations) {
         for (auto& outvar: old_eq.get_output()) {
             id_equation_map[outvar.get_id()] = new_equations.size();
@@ -479,6 +494,7 @@ void TRS_class::apply_term_rewrite(bool fast_math) {
                 value& y = eq.get_input(1);
                 var_t& z = eq.get_output(0);
 
+                if (fold_binary(eq, [](double a, double b) { return a + b; })) break;
                 if (rewrite_values(x, y, z)) break;
                 if (rewrite_values(y, x, z)) break;
                 resolve_broadcast(eq);
@@ -553,6 +569,7 @@ void TRS_class::apply_term_rewrite(bool fast_math) {
                 value& y = eq.get_input(1);
                 var_t& z = eq.get_output(0);
 
+                if (fold_binary(eq, [](double a, double b) { return a * b; })) break;
                 if (rewrite_values(x, y, z)) break;
                 if (rewrite_values(y, x, z)) break;
                 resolve_broadcast(eq);
@@ -569,6 +586,8 @@ void TRS_class::apply_term_rewrite(bool fast_math) {
                 value& x = eq.get_input(0);
                 value& y = eq.get_input(1);
                 var_t& z = eq.get_output(0);
+
+                if (fold_binary(eq, [](double a, double b) { return a - b; })) break;
 
                 if (y.is<literal_t>()) {
                     if (y.get_literal().get_value() == 0) {
@@ -626,6 +645,8 @@ void TRS_class::apply_term_rewrite(bool fast_math) {
                 value& y = eq.get_input(1);
                 var_t& z = eq.get_output(0);
 
+                if (fold_binary(eq, [](double a, double b) { return a / b; })) break;
+
                 if (y.is<literal_t>()) {
                     if (y.get_literal().get_value() == 1) {
                         bind(z, x);
@@ -653,6 +674,8 @@ void TRS_class::apply_term_rewrite(bool fast_math) {
                 value& x = eq.get_input(0);
                 var_t& z = eq.get_output(0);
 
+                if (fold_unary(eq, [](double a) { return -a; })) break;
+
                 if (x.is<var_t>()) {
                     if (auto inner = trace(x.get_var().get_id(), [](equation& e) -> bool {
                         return e.get_op() == NEG;
@@ -674,6 +697,14 @@ void TRS_class::apply_term_rewrite(bool fast_math) {
                 value& x = eq.get_input(0);
                 var_t& z = eq.get_output(0);
 
+                if (x.is<literal_t>()) {
+                    double acc = 1;
+                    const double base = x.get_literal().get_value();
+                    for (size_t k = 0; k < std::get<integer_pow_params>(eq.get_params()).y; k++) acc *= base;
+                    bind_constant(z, acc);
+                    break;
+                }
+
                 if (std::get<integer_pow_params>(eq.get_params()).y == 1) {
                     bind(z, x);
                     break;
@@ -693,6 +724,8 @@ void TRS_class::apply_term_rewrite(bool fast_math) {
                 value& x = eq.get_input(0);
                 value& y = eq.get_input(1);
                 var_t& z = eq.get_output(0);
+
+                if (fold_binary(eq, [](double a, double b) { return std::pow(a, b); })) break;
 
                 std::optional<double> exponent;
                 if (y.is<literal_t>()) {
@@ -735,6 +768,8 @@ void TRS_class::apply_term_rewrite(bool fast_math) {
                 value& x = eq.get_input(0);
                 var_t& z = eq.get_output(0);
 
+                if (fold_unary(eq, [](double a) { return std::log(a); })) break;
+
                 if (fast_math && x.is<var_t>()) {
                     if (auto inner = trace(x.get_var().get_id(), [](equation& e) -> bool {
                         return e.get_op() == EXP;
@@ -757,6 +792,8 @@ void TRS_class::apply_term_rewrite(bool fast_math) {
                 value& x = eq.get_input(0);
                 var_t& z = eq.get_output(0);
 
+                if (fold_unary(eq, [](double a) { return std::exp(a); })) break;
+
                 if (fast_math && x.is<var_t>()) {
                     if (auto inner = trace(x.get_var().get_id(), [](equation& e) -> bool {
                         return e.get_op() == LOG;
@@ -771,22 +808,106 @@ void TRS_class::apply_term_rewrite(bool fast_math) {
                 break;
             }
 
-            case SIN:
-            case COS:
-            case SQRT:
-            case RSQRT:
-            case TANH:
-            case LOGISTIC:
-            case MAX:
-            case MIN:
-            case CONVERT_ELEMENT_TYPE:
-            case SELECT:
-            case EQ:
-            case NE:
-            case LT:
-            case LE:
-            case GT:
+            case SIN: {
+                if (fold_unary(eq, [](double a) { return std::sin(a); })) break;
+                resolve_broadcast(eq);
+                break;
+            }
+
+            case COS: {
+                if (fold_unary(eq, [](double a) { return std::cos(a); })) break;
+                resolve_broadcast(eq);
+                break;
+            }
+
+            case SQRT: {
+                if (fold_unary(eq, [](double a) { return std::sqrt(a); })) break;
+                resolve_broadcast(eq);
+                break;
+            }
+
+            case RSQRT: {
+                if (fold_unary(eq, [](double a) { return 1. / std::sqrt(a); })) break;
+                resolve_broadcast(eq);
+                break;
+            }
+
+            case TANH: {
+                if (fold_unary(eq, [](double a) { return std::tanh(a); })) break;
+                resolve_broadcast(eq);
+                break;
+            }
+
+            case LOGISTIC: {
+                if (fold_unary(eq, [](double a) { return 1. / (1. + std::exp(-a)); })) break;
+                resolve_broadcast(eq);
+                break;
+            }
+
+            case MAX: {
+                if (fold_binary(eq, [](double a, double b) { return std::max(a, b); })) break;
+                resolve_broadcast(eq);
+                break;
+            }
+
+            case MIN: {
+                if (fold_binary(eq, [](double a, double b) { return std::min(a, b); })) break;
+                resolve_broadcast(eq);
+                break;
+            }
+
+            case CONVERT_ELEMENT_TYPE: {
+                if (fold_unary(eq, [](double a) { return a; })) break;
+                resolve_broadcast(eq);
+                break;
+            }
+
+            case LT: {
+                if (fold_binary(eq, [](double a, double b) { return a < b; })) break;
+                resolve_broadcast(eq);
+                break;
+            }
+
+            case LE: {
+                if (fold_binary(eq, [](double a, double b) { return a <= b; })) break;
+                resolve_broadcast(eq);
+                break;
+            }
+
+            case GT: {
+                if (fold_binary(eq, [](double a, double b) { return a > b; })) break;
+                resolve_broadcast(eq);
+                break;
+            }
+
             case GE: {
+                if (fold_binary(eq, [](double a, double b) { return a >= b; })) break;
+                resolve_broadcast(eq);
+                break;
+            }
+
+            case EQ: {
+                if (fold_binary(eq, [](double a, double b) { return double_eq(a, b); })) break;
+                resolve_broadcast(eq);
+                break;
+            }
+
+            case NE: {
+                if (fold_binary(eq, [](double a, double b) { return !double_eq(a, b); })) break;
+                resolve_broadcast(eq);
+                break;
+            }
+
+            case SELECT: {
+                value& pred = eq.get_input(0);
+                var_t& z = eq.get_output(0);
+
+                if (pred.is<literal_t>()) {
+                    size_t index = static_cast<size_t>(pred.get_literal().get_value());
+                    bind(z, eq.get_input(1 + index));
+                    break;
+                }
+
                 resolve_broadcast(eq);
                 break;
             }
