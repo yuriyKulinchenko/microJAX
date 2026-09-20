@@ -35,7 +35,7 @@ void DCE_class::apply_dead_code_elimination() {
     std::unordered_set<size_t> used_ids {};
 
     for (auto& val: input_expr.outvals) {
-        if (val.is<literal_t>()) continue;
+        if (val.is_literal()) continue;
         used_ids.insert(val.get_var().get_id());
     }
 
@@ -60,7 +60,7 @@ void DCE_class::apply_dead_code_elimination() {
 
         if (!keep_equation) continue;
         for (auto& input: equation.get_input()) {
-            if (input.is<literal_t>()) continue;
+            if (input.is_literal()) continue;
             used_ids.insert(input.get_var().get_id());
         }
 
@@ -123,8 +123,8 @@ static bool is_commutative_op(const primitive_op op) {
 }
 
 static bool value_less(const value& a, const value& b) {
-    const bool a_literal = a.is<literal_t>();
-    const bool b_literal = b.is<literal_t>();
+    const bool a_literal = a.is_literal();
+    const bool b_literal = b.is_literal();
     if (a_literal != b_literal) {
         return a_literal; // literals order before variables
     }
@@ -170,7 +170,7 @@ namespace std {
     template<>
     struct std::hash<value> {
         size_t operator()(const value& val) const noexcept {
-            if (val.is<literal_t>()) {
+            if (val.is_literal()) {
                 return std::hash<literal_t>{}(val.get_literal());
             }
             return std::hash<size_t>{}(val.get_var().get_id());
@@ -200,7 +200,7 @@ void CSE_class::apply_common_subexpression_elimination() {
 
     auto path_compress = [&](std::span<value> values) -> void {
         for (auto& val: values) {
-            if (val.is<var_t>()) {
+            if (val.is_var()) {
                 size_t& var_id = val.get_var().get_id();
                 var_id = find(var_id);
             }
@@ -245,7 +245,7 @@ TRS_class::TRS_class(expression& expr): input_expr(expr) {}
 
 using value_variant = std::variant<size_t, literal_t>;
 static value_variant to_value_variant(const value& value) {
-    if (value.is<literal_t>()) {
+    if (value.is_literal()) {
         return value.get_literal();
     } else {
         return value.get_var().get_id();
@@ -280,7 +280,7 @@ void TRS_class::apply_term_rewrite(bool fast_math) {
     };
 
     auto find = [&](value& val) -> value_variant {
-        if (val.is<literal_t>()) return val.get_literal();
+        if (val.is_literal()) return val.get_literal();
         const var_t& val_var = val.get_var();
         if (const auto it = find_map.find(val_var.get_id()); it != find_map.end()) {
             return it->second;
@@ -311,7 +311,7 @@ void TRS_class::apply_term_rewrite(bool fast_math) {
 
     auto path_compress = [&](std::span<value> values) -> void {
         for (value& val: values) {
-            if (val.is<literal_t>()) continue;
+            if (val.is_literal()) continue;
             auto find_result = find(val);
             var_t& val_var = val.get_var();
             if (std::holds_alternative<size_t>(find_result)) {
@@ -356,7 +356,7 @@ void TRS_class::apply_term_rewrite(bool fast_math) {
 
         auto result = trace_broadcast(var_id);
         if (!result) return std::nullopt;
-        if (result->first.is<var_t>()) return std::nullopt;
+        if (result->first.is_var()) return std::nullopt;
         return std::pair<literal_t, const broadcast_in_dim_params&>(result->first.get_literal(), result->second);
     };
 
@@ -375,7 +375,7 @@ void TRS_class::apply_term_rewrite(bool fast_math) {
         using namespace std::views;
         // First, check to make sure that the first argument is a broadcast:
 
-        if (eq.get_input(0).is<literal_t>()) return false;
+        if (eq.get_input(0).is_literal()) return false;
         auto result = trace_broadcast(eq.get_input(0).get_var().get_id());
         if (!result) return false;
 
@@ -385,7 +385,7 @@ void TRS_class::apply_term_rewrite(bool fast_math) {
         std::vector pre_broadcast_invals {result->first};
 
         if (!std::ranges::all_of(eq.get_input() | drop(1), [&](const value& val) -> bool {
-            if (val.is<literal_t>()) return false;
+            if (val.is_literal()) return false;
             auto val_result = trace_broadcast(val.get_var().get_id());
             if (!val_result) return false;
             // If there exists a result, compare it against params:
@@ -426,7 +426,7 @@ void TRS_class::apply_term_rewrite(bool fast_math) {
 
     auto fold_unary = [&](equation& eq, auto&& op) -> bool {
         const value& x = eq.get_input(0);
-        if (!x.is<literal_t>()) return false;
+        if (!x.is_literal()) return false;
         bind_constant(eq.get_output(0), op(x.get_literal().get_value()));
         return true;
     };
@@ -434,7 +434,7 @@ void TRS_class::apply_term_rewrite(bool fast_math) {
     auto fold_binary = [&](equation& eq, auto&& op) -> bool {
         const value& x = eq.get_input(0);
         const value& y = eq.get_input(1);
-        if (!x.is<literal_t>() || !y.is<literal_t>()) return false;
+        if (!x.is_literal() || !y.is_literal()) return false;
         bind_constant(eq.get_output(0), op(x.get_literal().get_value(), y.get_literal().get_value()));
         return true;
     };
@@ -472,7 +472,7 @@ void TRS_class::apply_term_rewrite(bool fast_math) {
                 // add(x, 0) -> x, add(0, x) -> x:
 
                 auto rewrite_values = [&](const value& x, const value& y, var_t& z) -> bool {
-                    if (x.is<literal_t>()) {
+                    if (x.is_literal()) {
                         if (x.get_literal().get_value() == 0) {
                             // If x is a zero literal, then bind z to y:
                             bind(z, y);
@@ -511,7 +511,7 @@ void TRS_class::apply_term_rewrite(bool fast_math) {
 
                 // Returns whether rewrite happened:
                 auto rewrite_values = [&](const value& x, const value& y, var_t& z) -> bool {
-                    if (x.is<literal_t>()) {
+                    if (x.is_literal()) {
                         if (x.get_literal().get_value() == 1) {
                             bind(z, y);
                             return true;
@@ -589,7 +589,7 @@ void TRS_class::apply_term_rewrite(bool fast_math) {
 
                 if (fold_binary(eq, [](double a, double b) { return a - b; })) break;
 
-                if (y.is<literal_t>()) {
+                if (y.is_literal()) {
                     if (y.get_literal().get_value() == 0) {
                         bind(z, x);
                         break;
@@ -604,7 +604,7 @@ void TRS_class::apply_term_rewrite(bool fast_math) {
                     }
                 }
 
-                if (x.is<literal_t>()) {
+                if (x.is_literal()) {
                     if (x.get_literal().get_value() == 0) {
                         var_t neg_var = fresh_var(z.get_type());
                         bind(z, value{neg_var});
@@ -647,7 +647,7 @@ void TRS_class::apply_term_rewrite(bool fast_math) {
 
                 if (fold_binary(eq, [](double a, double b) { return a / b; })) break;
 
-                if (y.is<literal_t>()) {
+                if (y.is_literal()) {
                     if (y.get_literal().get_value() == 1) {
                         bind(z, x);
                         break;
@@ -676,7 +676,7 @@ void TRS_class::apply_term_rewrite(bool fast_math) {
 
                 if (fold_unary(eq, [](double a) { return -a; })) break;
 
-                if (x.is<var_t>()) {
+                if (x.is_var()) {
                     if (auto inner = trace(x.get_var().get_id(), [](equation& e) -> bool {
                         return e.get_op() == NEG;
                     })) {
@@ -697,7 +697,7 @@ void TRS_class::apply_term_rewrite(bool fast_math) {
                 value& x = eq.get_input(0);
                 var_t& z = eq.get_output(0);
 
-                if (x.is<literal_t>()) {
+                if (x.is_literal()) {
                     double acc = 1;
                     const double base = x.get_literal().get_value();
                     for (size_t k = 0; k < std::get<integer_pow_params>(eq.get_params()).y; k++) acc *= base;
@@ -728,7 +728,7 @@ void TRS_class::apply_term_rewrite(bool fast_math) {
                 if (fold_binary(eq, [](double a, double b) { return std::pow(a, b); })) break;
 
                 std::optional<double> exponent;
-                if (y.is<literal_t>()) {
+                if (y.is_literal()) {
                     exponent = y.get_literal().get_value();
                 } else if (auto y_result = trace_literal_broadcast(y.get_var().get_id())) {
                     exponent = y_result->first.get_value();
@@ -770,7 +770,7 @@ void TRS_class::apply_term_rewrite(bool fast_math) {
 
                 if (fold_unary(eq, [](double a) { return std::log(a); })) break;
 
-                if (fast_math && x.is<var_t>()) {
+                if (fast_math && x.is_var()) {
                     if (auto inner = trace(x.get_var().get_id(), [](equation& e) -> bool {
                         return e.get_op() == EXP;
                     })) {
@@ -794,7 +794,7 @@ void TRS_class::apply_term_rewrite(bool fast_math) {
 
                 if (fold_unary(eq, [](double a) { return std::exp(a); })) break;
 
-                if (fast_math && x.is<var_t>()) {
+                if (fast_math && x.is_var()) {
                     if (auto inner = trace(x.get_var().get_id(), [](equation& e) -> bool {
                         return e.get_op() == LOG;
                     })) {
@@ -902,7 +902,7 @@ void TRS_class::apply_term_rewrite(bool fast_math) {
                 value& pred = eq.get_input(0);
                 var_t& z = eq.get_output(0);
 
-                if (pred.is<literal_t>()) {
+                if (pred.is_literal()) {
                     size_t index = static_cast<size_t>(pred.get_literal().get_value());
                     bind(z, eq.get_input(1 + index));
                     break;

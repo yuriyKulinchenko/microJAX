@@ -62,10 +62,8 @@ namespace jax {
         explicit value(literal_t literal);
         explicit value(var_t var);
 
-        template<typename T>
-        [[nodiscard]] bool is() const {
-            return std::holds_alternative<T>(variant_);
-        }
+        [[nodiscard]] bool is_literal() const;
+        [[nodiscard]] bool is_var() const;
 
         // Types are NOT returned by const&, as in the event that
         // the value is a literal, it does not have an underlying

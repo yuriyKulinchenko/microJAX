@@ -45,23 +45,31 @@ namespace jax {
     value::value(literal_t literal): variant_(std::move(literal)) {}
     value::value(var_t var): variant_(std::move(var)) {}
 
+    bool value::is_literal() const {
+        return std::holds_alternative<literal_t>(variant_);
+    }
+
+    bool value::is_var() const {
+        return std::holds_alternative<var_t>(variant_);
+    }
+
     const literal_t& value::get_literal() const {
         if constexpr (checked_variant_access) {
-            if (!is<literal_t>()) throw std::logic_error("Error: get_literal() called on a value holding a var_t");
+            if (!is_literal()) throw std::logic_error("Error: get_literal() called on a value holding a var_t");
         }
         return *std::get_if<literal_t>(&variant_);
     }
 
     const var_t& value::get_var() const {
         if constexpr (checked_variant_access) {
-            if (!is<var_t>()) throw std::logic_error("Error: get_var() called on a value holding a literal_t");
+            if (!is_var()) throw std::logic_error("Error: get_var() called on a value holding a literal_t");
         }
         return *std::get_if<var_t>(&variant_);
     }
 
     var_t &value::get_var() {
         if constexpr (checked_variant_access) {
-            if (!is<var_t>()) throw std::logic_error("Error: get_var() called on a value holding a literal_t");
+            if (!is_var()) throw std::logic_error("Error: get_var() called on a value holding a literal_t");
         }
         return *std::get_if<var_t>(&variant_);
     }
@@ -71,14 +79,14 @@ namespace jax {
     }
 
     const std::vector<size_t> &value::get_shape() const {
-        if (is<var_t>()) {
+        if (is_var()) {
             return std::get<var_t>(variant_).get_shape();
         }
         return literal_t::get_shape();
     }
 
     type_t value::get_type() const {
-        if (is<var_t>()) {
+        if (is_var()) {
             return std::get<var_t>(variant_).get_type();
         }
         return type_t{std::get<literal_t>(variant_).get_dtype(), literal_t::get_shape()};

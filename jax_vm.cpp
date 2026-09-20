@@ -406,7 +406,7 @@ std::vector<array_t> jax_vm::run(const std::vector<array_t>& input) {
     }
 
     return jaxpr.outvals | std::views::transform([this](const value& val) -> array_t {
-        if (val.is<literal_t>()) {
+        if (val.is_literal()) {
             return literal_to_array(val.get_literal());
         }
         return fetch_value(val.get_var());
@@ -434,7 +434,7 @@ void jax_vm::emplace_variable(const var_t& var, array_t array) {
 
 const array_t& jax_vm::get_input(const equation& eq, size_t i) {
     // Assumes a populated literal buffer
-    if (eq.get_input(i).is<literal_t>()) {
+    if (eq.get_input(i).is_literal()) {
         return *literal_buffer[i];
     }
 
@@ -448,7 +448,7 @@ array_t jax_vm::literal_to_array(const literal_t& literal) {
 void jax_vm::populate_literal_buffer(const equation& eq) {
     literal_buffer.assign(eq.get_input().size(), std::nullopt);
     for (size_t i = 0; i < eq.get_input().size(); i++) {
-        if (eq.get_input(i).is<literal_t>()) {
+        if (eq.get_input(i).is_literal()) {
             auto& literal = eq.get_input(i).get_literal();
             literal_buffer[i] = literal_to_array(literal);
         }

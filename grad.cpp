@@ -134,7 +134,7 @@ void grad_class::update_adjoint(
 }
 
 value grad_class::negate(const value& val) {
-    if (val.is<literal_t>()) {
+    if (val.is_literal()) {
         auto& literal = val.get_literal();
         if (literal.get_dtype() == dtype_t::BOOL) {
             throw std::logic_error{"Error: cannot negate boolean"};
@@ -177,7 +177,7 @@ value grad_class::broadcasted_value(const type_t& type, double x) {
 }
 
 bool all_inputs_constant(const std::vector<value>& inputs) {
-    for (auto& input: inputs) if (input.is<var_t>()) return false;
+    for (auto& input: inputs) if (input.is_var()) return false;
     return true;
 }
 
@@ -203,7 +203,7 @@ bool grad_class::should_propagate(const std::vector<value>& input_vals,
 
     bool input_var_exists = false;
     for (auto& input_val: input_vals) {
-        if (input_val.is<var_t>() && !is_integral(input_val.get_dtype())) {
+        if (input_val.is_var() && !is_integral(input_val.get_dtype())) {
             input_var_exists = true;
             break;
         }
@@ -486,11 +486,11 @@ void grad_class::propagate_adjoints(equation& eq) {
             auto& x_val = eq.get_input(0);
             auto& y_val = eq.get_input(1);
 
-            if (x_val.is<var_t>()) {
+            if (x_val.is_var()) {
                 update_adjoint(x_val.get_var(), *output_adj);
             }
 
-            if (y_val.is<var_t>()) {
+            if (y_val.is_var()) {
                 update_adjoint(y_val.get_var(), *output_adj);
             }
             break;
@@ -509,11 +509,11 @@ void grad_class::propagate_adjoints(equation& eq) {
             auto& x_val = eq.get_input(0);
             auto& y_val = eq.get_input(1);
 
-            if (x_val.is<var_t>()) {
+            if (x_val.is_var()) {
                 update_adjoint(x_val.get_var(), *output_adj);
             }
 
-            if (y_val.is<var_t>()) {
+            if (y_val.is_var()) {
                 update_adjoint(y_val.get_var(), negate(*output_adj));
             }
             break;
@@ -532,11 +532,11 @@ void grad_class::propagate_adjoints(equation& eq) {
             auto& x_val = eq.get_input(0);
             auto& y_val = eq.get_input(1);
 
-            if (x_val.is<var_t>()) {
+            if (x_val.is_var()) {
                 update_adjoint(x_val.get_var(), y_val, *output_adj);
             }
 
-            if (y_val.is<var_t>()) {
+            if (y_val.is_var()) {
                 update_adjoint(y_val.get_var(), x_val, *output_adj);
             }
 
@@ -557,7 +557,7 @@ void grad_class::propagate_adjoints(equation& eq) {
             auto& x_val = eq.get_input(0);
             auto& y_val = eq.get_input(1);
 
-            if (x_val.is<var_t>()) {
+            if (x_val.is_var()) {
                 auto quotient_val = fresh_var(x_val.get_type());
 
                 output_expr.equations.emplace_back(
@@ -571,7 +571,7 @@ void grad_class::propagate_adjoints(equation& eq) {
 
             // dz/dy = - x / (y * y) => y' += z' * neg(z/y)
 
-            if (y_val.is<var_t>()) {
+            if (y_val.is_var()) {
                 auto quotient_val = fresh_var(y_val.get_type());
 
                 output_expr.equations.emplace_back(
@@ -615,7 +615,7 @@ void grad_class::propagate_adjoints(equation& eq) {
 
             value zero = broadcasted_value(output_var.get_type(), 0.);
 
-            if (x_val.is<var_t>()) {
+            if (x_val.is_var()) {
                 auto selected = fresh_var(output_var.get_type());
 
                 output_expr.equations.emplace_back(
@@ -627,7 +627,7 @@ void grad_class::propagate_adjoints(equation& eq) {
                 update_adjoint(x_val.get_var(), value{selected});
             }
 
-            if (y_val.is<var_t>()) {
+            if (y_val.is_var()) {
                 auto selected = fresh_var(output_var.get_type());
 
                 output_expr.equations.emplace_back(
@@ -649,7 +649,7 @@ void grad_class::propagate_adjoints(equation& eq) {
             auto& x_val = eq.get_input(0);
             auto& y_val = eq.get_input(1);
 
-            if (x_val.is<var_t>()) {
+            if (x_val.is_var()) {
                 value one = broadcasted_value(y_val.get_type(), 1.);
                 auto y_minus_one = fresh_var(y_val.get_type());
 
@@ -678,7 +678,7 @@ void grad_class::propagate_adjoints(equation& eq) {
                 update_adjoint(x_val.get_var(), value{f_prime_var}, *output_adj);
             }
 
-            if (y_val.is<var_t>()) {
+            if (y_val.is_var()) {
                 auto log_x = fresh_var(x_val.get_type());
 
                 output_expr.equations.emplace_back(
@@ -706,7 +706,7 @@ void grad_class::propagate_adjoints(equation& eq) {
             if (!output_adj) break;
 
             auto& input_val = eq.get_input(0);
-            if (input_val.is<literal_t>()) break;
+            if (input_val.is_literal()) break;
             auto& input_var = input_val.get_var();
 
             // The adjoint is a broadcast of the output_adj
@@ -738,7 +738,7 @@ void grad_class::propagate_adjoints(equation& eq) {
             if (!output_adj) break;
 
             auto& input_val = eq.get_input(0);
-            if (input_val.is<literal_t>()) break;
+            if (input_val.is_literal()) break;
             auto& input_var = input_val.get_var();
 
             const auto& input_type = input_var.get_type();
@@ -803,7 +803,7 @@ void grad_class::propagate_adjoints(equation& eq) {
             if (!output_adj) break;
 
             auto& input_val = eq.get_input(0);
-            if (input_val.is<literal_t>()) break;
+            if (input_val.is_literal()) break;
             auto& input_var = input_val.get_var();
 
             // The adjoint is a summation over the newly added ranks
@@ -1137,7 +1137,7 @@ void grad_class::propagate_adjoints(equation& eq) {
             // reference into that vector may be held across the update loop.
             std::vector<std::pair<var_t, var_t>> adjoint_updates {};
             for (size_t i = 1; i < input_vals.size(); i++) {
-                if (input_vals[i].is<var_t>()) {
+                if (input_vals[i].is_var()) {
                     adjoint_updates.emplace_back(input_vals[i].get_var(), outputs[i - 1]);
                 }
             }
@@ -1327,7 +1327,7 @@ void grad_class::propagate_adjoints(equation& eq) {
             // Update adjoints:
 
             for (size_t i = 0; i < eq_inputs.size(); i++) {
-                if (!eq_inputs[i].is<var_t>()) continue;
+                if (!eq_inputs[i].is_var()) continue;
                 update_adjoint(eq_inputs[i].get_var(), value{updates[i]});
             }
 
@@ -1353,7 +1353,7 @@ void grad_class::propagate_adjoints(equation& eq) {
 
             for (size_t i = 1; i < inputs.size(); i++) {
 
-                if (!inputs[i].is<var_t>()) {
+                if (!inputs[i].is_var()) {
                     continue;
                 }
 
@@ -1416,7 +1416,7 @@ void grad_class::propagate_adjoints(equation& eq) {
             auto& output_vars = eq.get_output();
 
             if (!should_propagate(input_vals, output_vars)) break;
-            if (!input_vals[0].is<var_t>()) break; // Nothing to propagate to x
+            if (!input_vals[0].is_var()) break; // Nothing to propagate to x
 
             auto& x = input_vals[0];
             auto& idx = input_vals[1];
@@ -1452,11 +1452,11 @@ void grad_class::propagate_adjoints(equation& eq) {
 
             auto& output_adj = *get_adjoint(output_vars[0]); // Guaranteed not null
 
-            if (x.is<var_t>()) {
+            if (x.is_var()) {
                 update_adjoint(x.get_var(), output_adj);
             }
 
-            if (u.is<var_t>()) {
+            if (u.is_var()) {
                 var_t u_adjoint = fresh_var(u.get_type());
 
                 output_expr.equations.emplace_back(
@@ -1487,7 +1487,7 @@ void grad_class::propagate_adjoints(equation& eq) {
 
             auto& output_adj = *get_adjoint(output_vars[0]); // Guaranteed not null
 
-            if (x.is<var_t>()) {
+            if (x.is_var()) {
                 // x += scatter-mul(y', idx, u)
                 auto& x_type = x.get_var().get_type();
 
@@ -1502,7 +1502,7 @@ void grad_class::propagate_adjoints(equation& eq) {
                 update_adjoint(x.get_var(), value{x_adjoint});
             }
 
-            if (u.is<var_t>()) {
+            if (u.is_var()) {
                 // u' += gather(y', idx) * gather(y, idx) / u
                 auto& u_type = u.get_var().get_type();
 
@@ -1564,7 +1564,7 @@ void grad_class::propagate_adjoints(equation& eq) {
 
             auto& output_adj = *get_adjoint(output_vars[0]); // Guaranteed not null
 
-            if (x.is<var_t>()) {
+            if (x.is_var()) {
                 // x' += select(y > x, y', 0)
                 auto& x_type = x.get_var().get_type();
 
@@ -1588,7 +1588,7 @@ void grad_class::propagate_adjoints(equation& eq) {
                 update_adjoint(x.get_var(), value{selected_x});
             }
 
-            if (u.is<var_t>()) {
+            if (u.is_var()) {
                 // u' += select(gather(y, idx) > u, gather(y', idx), 0)
                 auto& u_type = u.get_var().get_type();
 
@@ -1647,7 +1647,7 @@ void grad_class::propagate_adjoints(equation& eq) {
 
             auto& output_adj = *get_adjoint(output_vars[0]); // Guaranteed not null
 
-            if (x.is<var_t>()) {
+            if (x.is_var()) {
                 // written_mask = scatter_add(0, idx, 1) > 0
                 // x' += select(written_mask, 0, y')
 
@@ -1684,7 +1684,7 @@ void grad_class::propagate_adjoints(equation& eq) {
                 update_adjoint(x.get_var(), value{x_adjoint});
             }
 
-            if (u.is<var_t>()) {
+            if (u.is_var()) {
                 // => u' += gather(y', idx)
                 var_t u_adjoint = fresh_var(u.get_type());
 
@@ -1822,7 +1822,7 @@ void grad_class::propagate_adjoints(equation& eq) {
 
             size_t rank = y.get_shape().size();
 
-            if (x.is<var_t>()) {
+            if (x.is_var()) {
                // x' += slice(y', ...)
                 // Sort the slice params:
 
@@ -1855,7 +1855,7 @@ void grad_class::propagate_adjoints(equation& eq) {
                 update_adjoint(x_var, value{sliced_adjoint});
             }
 
-            if (k.is<var_t>()) {
+            if (k.is_var()) {
                 // k' += reduce-sum(mask * y', all axes), where mask = pad(0, 1, ...)
 
                 value zero = broadcasted_value(x.get_type(), 0.);
@@ -1973,7 +1973,7 @@ expression grad_class::find_grad() {
 
     // Seed the adjoint of the initial equation:
 
-    if (!outval.is<literal_t>() && !is_integral(outval.get_dtype())) {
+    if (!outval.is_literal() && !is_integral(outval.get_dtype())) {
         const var_t& output_var = input_expr.outvals[0].get_var();
         update_adjoint(output_var, broadcasted_value(output_var.get_type(), 1));
     }
@@ -2031,7 +2031,7 @@ expression grad_class::find_grad_general() {
         var_t y_bar_param = fresh_var(output_val.get_type());
         output_expr.add_invar(y_bar_param);
 
-        if (output_val.is<literal_t>()) continue;
+        if (output_val.is_literal()) continue;
 
         auto& output_var = output_val.get_var();
         update_adjoint(output_var, value{y_bar_param});

@@ -39,7 +39,7 @@ std::ostream& emit_value_vector(std::ostream& stream,
     const std::vector<value>& values, const char* separator) {
     for (int i = 0; i < values.size(); i++) {
         const value& val = values[i];
-        if (val.is<literal_t>()) {
+        if (val.is_literal()) {
             const literal_t& literal = val.get_literal();
             emit_typed_literal(stream, literal);
         } else {
