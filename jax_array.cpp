@@ -348,12 +348,13 @@ namespace jax {
         // permuted_indices[i] = indices[transpose[i]]
         std::vector<size_t> indices(type.get_shape().size(), 0);
         std::vector new_shape(permute(type.get_shape(), permutation));
+        std::vector<size_t> inverse_permutation(invert_permutation(permutation));
 
         std::vector<double> new_value {};
         new_value.reserve(num_elements(new_shape));
 
         for (auto& is: cartesian_product{indices, new_shape}) {
-            new_value.push_back(operator[](permute(is, permutation)));
+            new_value.push_back(operator[](permute(is, inverse_permutation)));
         }
 
         return array_t{type_t{type.get_dtype(), std::move(new_shape)}, std::move(new_value)};

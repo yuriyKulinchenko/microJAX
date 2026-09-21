@@ -279,6 +279,20 @@ void TRS_class::apply_term_rewrite(bool fast_math) {
         return var_t{fresh_var_id++, std::move(type)};
     };
 
+    auto emplace_equation_to_buffer = [&](
+        std::vector<value> input, std::vector<var_t> output,
+        primitive_op op, params_variant params=std::monostate{}) -> void {
+
+        size_t new_equation_index = new_equations.size() + equation_buffer.size();
+        for (var_t& outvar: output) {
+            id_equation_map[outvar.get_id()] = new_equation_index;
+        }
+
+        equation_buffer.emplace_back(
+            std::move(input), std::move(output), op, std::move(params)
+        );
+    };
+
     auto find = [&](value& val) -> value_variant {
         if (val.is_literal()) return val.get_literal();
         const var_t& val_var = val.get_var();
@@ -299,13 +313,15 @@ void TRS_class::apply_term_rewrite(bool fast_math) {
         } else {
             var_t broadcast_var = fresh_var(var.get_type());
             find_map[var.get_id()] = broadcast_var.get_id();
-            id_equation_map[broadcast_var.get_id()] = new_equations.size() + equation_buffer.size();
-            equation_buffer.emplace_back(
-                std::vector{value{literal_t{var.get_dtype(), x}}},
-                std::vector{broadcast_var},
+            value x_value {literal_t{var.get_dtype(), x}};
+
+            emplace_equation_to_buffer(
+                std::vector{std::move(x_value)},
+                std::vector{std::move(broadcast_var)},
                 primitive_op::BROADCAST_IN_DIM,
                 broadcast_in_dim_params{var.get_shape(), {}}
             );
+
         }
     };
 
@@ -403,7 +419,7 @@ void TRS_class::apply_term_rewrite(bool fast_math) {
 
         var_t f_var = fresh_var(type_t{y.get_dtype(), pre_broadcast_shape});
 
-        equation_buffer.emplace_back(
+        emplace_equation_to_buffer(
             std::move(pre_broadcast_invals),
             std::vector{f_var},
             eq.get_op(),
@@ -411,16 +427,15 @@ void TRS_class::apply_term_rewrite(bool fast_math) {
         );
 
         var_t bc_var = fresh_var(y.get_type());
+        bind(y, value{bc_var});
 
-        id_equation_map[bc_var.get_id()] = new_equations.size() + equation_buffer.size();
-        equation_buffer.emplace_back(
-            std::vector{value{f_var}},
-            std::vector{bc_var},
+        emplace_equation_to_buffer(
+            std::vector{value{std::move(f_var)}},
+            std::vector{std::move(bc_var)},
             primitive_op::BROADCAST_IN_DIM,
             std::move(params)
         );
 
-        bind(y, value{bc_var});
         return true;
     };
 
@@ -446,25 +461,10 @@ void TRS_class::apply_term_rewrite(bool fast_math) {
 
         new_equations.push_back(old_eq);
         path_compress(new_equations.back().get_input());
-        auto& eq = new_equations.back(); // This is NOT stable
+        auto& eq = new_equations.back();
 
-        switch (old_eq.get_op()) {
+        switch (eq.get_op()) {
             using enum primitive_op;
-
-            /*
-
-            reshape(reshape(x, _), s) -> reshape(x, s)
-            reshape(x, shape(x)) -> x
-            transpose(transpose(x, p), q) -> transpose(x, q∘p), and transpose(x, identity) -> x
-            broadcast(broadcast(x)) -> broadcast(x) (compose to the outer shape)
-            broadcast_in_dim(x, shape(x), identity_dims) -> x
-            convert_element_type(x, dtype(x)) -> x
-            concatenate([x]) -> x (single operand)
-            slice(x, full-range, stride 1) -> x
-            pad(x, k, all-zero config) -> x
-            reduce_*(x, {}) -> x (empty axis set)
-
-            */
 
             case ADD: {
                 // %z = add %x %y
@@ -526,12 +526,13 @@ void TRS_class::apply_term_rewrite(bool fast_math) {
                             // Have to emit a new instruction:
                             var_t neg_var = fresh_var(z.get_type());
                             bind(z, value{neg_var});
-                            id_equation_map[neg_var.get_id()] = new_equations.size() + equation_buffer.size();
-                            equation_buffer.emplace_back(
+
+                            emplace_equation_to_buffer(
                                 std::vector{y},
                                 std::vector{std::move(neg_var)},
                                 NEG
                             );
+
                             return true;
                         }
                         return false;
@@ -552,8 +553,8 @@ void TRS_class::apply_term_rewrite(bool fast_math) {
                         if (x_result->first.get_value() == -1) {
                             var_t neg_var = fresh_var(z.get_type());
                             bind(z, value{neg_var});
-                            id_equation_map[neg_var.get_id()] = new_equations.size() + equation_buffer.size();
-                            equation_buffer.emplace_back(
+
+                            emplace_equation_to_buffer(
                                 std::vector{y},
                                 std::vector{std::move(neg_var)},
                                 NEG
@@ -608,8 +609,7 @@ void TRS_class::apply_term_rewrite(bool fast_math) {
                     if (x.get_literal().get_value() == 0) {
                         var_t neg_var = fresh_var(z.get_type());
                         bind(z, value{neg_var});
-                        id_equation_map[neg_var.get_id()] = new_equations.size() + equation_buffer.size();
-                        equation_buffer.emplace_back(
+                        emplace_equation_to_buffer(
                             std::vector{y},
                             std::vector{std::move(neg_var)},
                             NEG
@@ -621,8 +621,7 @@ void TRS_class::apply_term_rewrite(bool fast_math) {
                         if (x_result->first.get_value() == 0) {
                             var_t neg_var = fresh_var(z.get_type());
                             bind(z, value{neg_var});
-                            id_equation_map[neg_var.get_id()] = new_equations.size() + equation_buffer.size();
-                            equation_buffer.emplace_back(
+                            emplace_equation_to_buffer(
                                 std::vector{y},
                                 std::vector{std::move(neg_var)},
                                 NEG
@@ -744,7 +743,7 @@ void TRS_class::apply_term_rewrite(bool fast_math) {
                         if (auto n = static_cast<size_t>(*exponent); static_cast<double>(n) == *exponent) {
                             var_t pow_var = fresh_var(z.get_type());
                             bind(z, value{pow_var});
-                            equation_buffer.emplace_back(
+                            emplace_equation_to_buffer(
                                 std::vector{x},
                                 std::vector{std::move(pow_var)},
                                 INTEGER_POW,
@@ -857,6 +856,18 @@ void TRS_class::apply_term_rewrite(bool fast_math) {
             }
 
             case CONVERT_ELEMENT_TYPE: {
+                // %y = convert_element_type[T] %x
+                // convert_element_type(x, dtype(x)) -> x
+
+                value& x = eq.get_input(0);
+                var_t& y = eq.get_output(0);
+
+                if (std::get<convert_element_type_params>(eq.get_params()).new_dtype
+                    == x.get_dtype()) {
+                    bind(y, x);
+                    break;
+                }
+
                 if (fold_unary(eq, [](double a) { return a; })) break;
                 resolve_broadcast(eq);
                 break;
@@ -909,6 +920,207 @@ void TRS_class::apply_term_rewrite(bool fast_math) {
                 }
 
                 resolve_broadcast(eq);
+                break;
+            }
+
+            case RESHAPE: {
+                // %y = reshape[new_sizes] %x
+
+                value& x = eq.get_input(0);
+                var_t& y = eq.get_output(0);
+
+                // reshape(x, shape(x)) -> x:
+
+                if (x.get_shape() == std::get<reshape_params>(eq.get_params()).new_sizes) {
+                    bind(y, x);
+                    break;
+                }
+
+                // reshape(reshape(x, _), s) -> reshape(x, s)
+
+                if (x.is_var()) {
+                    if (auto result = trace(x.get_var().get_id(), [](equation& eq) -> bool {
+                        return eq.get_op() == RESHAPE;
+                    })) {
+                        value& inner_x = new_equations[*result].get_input(0);
+                        // Rewrite op:
+                        x = inner_x;
+                        break;
+                    }
+                }
+
+                break;
+            }
+
+            case CONCATENATE: {
+                // %y = concat %x1, ..., %xn
+
+                // concatenate([x]) -> x (single operand)
+                if (eq.get_input().size() == 1) {
+                    bind(eq.get_output(0), eq.get_input(0)); // %y = %x
+                    break;
+                }
+
+                break;
+            }
+
+            case TRANSPOSE: {
+                // %y = transpose[permutation] %x
+                value& x = eq.get_input(0);
+                var_t& y = eq.get_output(0);
+                std::vector<size_t>& permutation = std::get<transpose_params>(eq.get_params()).permutation;
+
+                // transpose(x, identity) -> x
+
+                if (is_identity_permutation(permutation)) {
+                    bind(y, x);
+                    break;
+                }
+
+                /*
+
+                Composition of permutation:
+                z = y[p], y = x[q], z = x[q][p]
+                => y_i = x_q_i
+                => z_i = y_p_i = x_q_p_i
+                composition = q[p] => composition_i = q_p_i
+                => z_i = x_composition_i => z = x[q[p]]
+
+                */
+
+                if (x.is_var()) {
+                    if (auto result = trace(x.get_var().get_id(), [](equation& eq) -> bool {
+                        return eq.get_op() == TRANSPOSE;
+                    })) {
+                        equation& inner_eq = new_equations[*result];
+                        auto& inner_permutation = std::get<transpose_params>(inner_eq.get_params()).permutation;
+                        std::vector<size_t> composed_permutation = permute(inner_permutation, permutation);
+
+                        var_t permuted_var = fresh_var(y.get_type());
+                        bind(y, value{permuted_var});
+
+                        emplace_equation_to_buffer(
+                            std::vector{inner_eq.get_input(0)},
+                            std::vector{std::move(permuted_var)},
+                            TRANSPOSE,
+                            transpose_params{std::move(composed_permutation)}
+                        );
+                    }
+                }
+
+                break;
+            }
+
+            case REDUCE_SUM:
+            case REDUCE_MIN:
+            case REDUCE_MAX: {
+                std::vector<size_t>& axes = std::invoke([&]() -> std::vector<size_t>& {
+                    if (eq.get_op() == REDUCE_SUM)
+                        return std::get<reduce_sum_params>(eq.get_params()).axes;
+                    if (eq.get_op() == REDUCE_MIN)
+                        return std::get<reduce_min_params>(eq.get_params()).axes;
+                    return std::get<reduce_max_params>(eq.get_params()).axes;
+                });
+
+                if (axes.empty()) {
+                    // reduce_op(x, {}) -> x (empty axis set)
+                    bind(eq.get_output(0), eq.get_input(0));
+                }
+                break;
+            }
+
+            case BROADCAST_IN_DIM: {
+                // %y = broadcast[shape, dims] %x
+
+                value& x = eq.get_input(0);
+                var_t& y = eq.get_output(0);
+                auto& params = std::get<broadcast_in_dim_params>(eq.get_params());
+
+                // broadcast_in_dim(x, shape(x), identity_dims) -> x
+
+                if (x.get_shape() == params.shape && is_identity_permutation(params.broadcast_dimensions)) {
+                    bind(y, x);
+                    break;
+                }
+
+                /*
+
+                Composition of broadcast:
+                y = broadcast(x) => y_ij = x_i
+                z = broadcast(y) => z_ijk = y_ij = x_i
+
+                Therefore, all the NEW axes in y remain new axes in z when projecting from x to z.
+
+                */
+
+                if (x.is_var()) {
+                    if (auto result = trace_broadcast(x.get_var().get_id())) {
+                        value& inner_x = result->first;
+                        const broadcast_in_dim_params& inner_params = result->second;
+                        std::vector<size_t> new_broadcast_dimensions {};
+                        new_broadcast_dimensions.reserve(inner_params.broadcast_dimensions.size());
+
+                        for (size_t i: inner_params.broadcast_dimensions) {
+                            size_t forwarded_i = params.broadcast_dimensions[i];
+                            new_broadcast_dimensions.push_back(forwarded_i);
+                        }
+
+                        var_t rebroadcast_var = fresh_var(y.get_type());
+                        bind(y, value{rebroadcast_var});
+
+                        emplace_equation_to_buffer(
+                            std::vector{inner_x},
+                            std::vector{rebroadcast_var},
+                            BROADCAST_IN_DIM,
+                            broadcast_in_dim_params {
+                                .shape = y.get_shape(),
+                                .broadcast_dimensions = std::move(new_broadcast_dimensions)
+                            }
+                        );
+
+                        break;
+                    }
+                }
+                break;
+            }
+
+            case SLICE: {
+                // %y = slice[start_indices, limit_indices, strides] %x
+
+                // slice(x, full-range, stride 1) -> x:
+
+                value& x = eq.get_input(0);
+                var_t& y = eq.get_output(0);
+                auto& params = std::get<slice_params>(eq.get_params());
+
+                if (
+                    std::ranges::all_of(params.start_indices, [](size_t x) {return x == 0;})
+                    && params.limit_indices == x.get_shape()
+                    && std::ranges::all_of(params.strides, [](size_t x) {return x == 1;})
+                ) {
+                    bind(y, x);
+                    break;
+                }
+
+                break;
+            }
+
+            case PAD: {
+                // %y = pad[padding_config] %x %k, padding_config = (low, high, interior) list
+
+                value& x = eq.get_input(0);
+                var_t& y = eq.get_output(0);
+                auto& [padding_config] = std::get<pad_params>(eq.get_params());
+
+                // pad(x, k, all-zero config) -> x
+
+                if (std::ranges::all_of(padding_config, [](std::array<size_t, 3>& x) {
+                    return x[0] == 0 && x[1] == 0 && x[2] == 0;
+                })) {
+                    bind(y, x);
+                    break;
+                }
+
                 break;
             }
 
