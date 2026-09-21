@@ -62,7 +62,7 @@ private:
     }
 
     const expression& jaxpr;
-    std::vector<std::unique_ptr<array_t>> values;
+    std::vector<array_t> values;
     std::vector<std::optional<array_t>> literal_buffer;
 };
 

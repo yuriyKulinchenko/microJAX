@@ -43,6 +43,7 @@ add_executable(microJAX_tests gtest_test.cpp
         DCE_class.cpp
         jax_vm.cpp
         jax_array.cpp
+        type_checker.cpp
 )
 
 target_link_libraries(microJAX_tests GTest::gtest_main)

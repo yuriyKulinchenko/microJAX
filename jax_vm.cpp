@@ -5,10 +5,135 @@
 #include "jax_vm.h"
 #include "helper.h"
 #include "jax_functions.h"
+#include "type_checker.h"
+
+namespace {
+    constexpr bool check_types = true;
+
+    void verify(const equation& eq, const std::expected<type_t, std::string>& result) {
+        if (!result) {
+            throw formatted_error("Error: type check of {} failed: {}",
+                to_string(eq.get_op()), result.error());
+        }
+        if (*result != eq.get_output(0).get_type()) {
+            throw formatted_error("Error: {} output type does not match its declared output variable",
+                to_string(eq.get_op()));
+        }
+    }
+
+    void verify_multi(const equation& eq, const std::expected<std::vector<type_t>, std::string>& result) {
+        if (!result) {
+            throw formatted_error("Error: type check of {} failed: {}",
+                to_string(eq.get_op()), result.error());
+        }
+        if (result->size() != eq.get_output().size()) {
+            throw formatted_error("Error: {} produced {} output types but the equation declares {} outputs",
+                to_string(eq.get_op()), result->size(), eq.get_output().size());
+        }
+        for (const auto& [expected, out]: std::views::zip(*result, eq.get_output())) {
+            if (expected != out.get_type()) {
+                throw formatted_error("Error: {} output type does not match its declared output variable",
+                    to_string(eq.get_op()));
+            }
+        }
+    }
+
+    void check_equation_type(const equation& eq) {
+        using enum primitive_op;
+        auto t = [&](size_t i) { return eq.get_input(i).get_type(); };
+        auto all_types = [&]() {
+            std::vector<type_t> types;
+            for (const value& v: eq.get_input()) types.push_back(v.get_type());
+            return types;
+        };
+        auto tail_types = [&]() {
+            std::vector<type_t> types;
+            for (const value& v: eq.get_input() | std::views::drop(1)) types.push_back(v.get_type());
+            return types;
+        };
+
+        switch (eq.get_op()) {
+            case SIN: case COS: case EXP: case LOG: case NEG:
+            case SQRT: case RSQRT: case TANH: case LOGISTIC:
+                verify(eq, unary_elementwise_type(t(0))); break;
+
+            case ADD: case SUB: case MUL: case DIV: case MAX: case MIN: case POW:
+                verify(eq, binary_elementwise_type(t(0), t(1))); break;
+
+            case LT: case LE: case GT: case GE: case EQ: case NE:
+                verify(eq, comparison_type(t(0), t(1))); break;
+
+            case INTEGER_POW:
+                verify(eq, std::expected<type_t, std::string>{t(0)}); break;
+
+            case REDUCE_SUM:
+                verify(eq, reduce_type(t(0), std::get<reduce_sum_params>(eq.get_params()).axes)); break;
+            case REDUCE_MAX:
+                verify(eq, reduce_type(t(0), std::get<reduce_max_params>(eq.get_params()).axes)); break;
+            case REDUCE_MIN:
+                verify(eq, reduce_type(t(0), std::get<reduce_min_params>(eq.get_params()).axes)); break;
+
+            case DOT_GENERAL: {
+                auto& [l_c, r_c, l_b, r_b] = std::get<dot_general_params>(eq.get_params());
+                verify(eq, dot_general_type(t(0), t(1), l_c, r_c, l_b, r_b));
+                break;
+            }
+
+            case BROADCAST_IN_DIM: {
+                auto& [shape, dims] = std::get<broadcast_in_dim_params>(eq.get_params());
+                verify(eq, broadcast_in_dim_type(t(0), shape, dims));
+                break;
+            }
+
+            case CONVERT_ELEMENT_TYPE:
+                verify(eq, convert_element_type_type(t(0),
+                    std::get<convert_element_type_params>(eq.get_params()).new_dtype)); break;
+
+            case TRANSPOSE:
+                verify(eq, transpose_type(t(0), std::get<transpose_params>(eq.get_params()).permutation)); break;
+
+            case RESHAPE:
+                verify(eq, reshape_type(t(0), std::get<reshape_params>(eq.get_params()).new_sizes)); break;
+
+            case GATHER:
+                verify(eq, gather_type(t(0), t(1))); break;
+
+            case SCATTER_ADD: case SCATTER_MUL: case SCATTER_MAX: case SCATTER_MIN: case SCATTER:
+                verify(eq, scatter_type(t(0), t(1), t(2))); break;
+
+            case SLICE: {
+                auto& [start, limit, strides] = std::get<slice_params>(eq.get_params());
+                verify(eq, slice_type(t(0), start, limit, strides));
+                break;
+            }
+
+            case PAD:
+                verify(eq, pad_type(t(0), t(1), std::get<pad_params>(eq.get_params()).padding_config)); break;
+
+            case CONCATENATE:
+                verify(eq, concatenate_type(all_types(),
+                    std::get<concatenate_params>(eq.get_params()).dimension)); break;
+
+            case SELECT:
+                verify(eq, select_type(t(0), tail_types())); break;
+
+            case COND:
+                verify_multi(eq, cond_type(t(0), tail_types(),
+                    std::get<cond_params>(eq.get_params()).branches)); break;
+
+            case SCAN: {
+                auto& params = std::get<scan_params>(eq.get_params());
+                verify_multi(eq, scan_type(all_types(), params.jaxpr,
+                    params.length, params.num_consts, params.num_carry));
+                break;
+            }
+        }
+    }
+}
 
 jax_vm::jax_vm(const expression& jaxpr):
 jaxpr(jaxpr),
-values(std::vector<std::unique_ptr<array_t>>(jaxpr.var_id)) {}
+values(std::vector<array_t>(jaxpr.var_id)) {}
 
 std::vector<array_t> jax_vm::run(const std::vector<array_t>& input) {
 
@@ -17,14 +142,15 @@ std::vector<array_t> jax_vm::run(const std::vector<array_t>& input) {
     reset();
 
     for (const auto& [invar, input_array]: std::views::zip(jaxpr.invars, input)) {
-        values[invar.get_id()] = std::make_unique<array_t>(input_array);
+        values[invar.get_id()] = input_array;
     }
 
     for (const auto& [constvar, const_array]: std::views::zip(jaxpr.constvars, jaxpr.consts)) {
-        values[constvar.get_id()] = std::make_unique<array_t>(const_array);
+        values[constvar.get_id()] = const_array;
     }
 
     for (auto& eq: jaxpr.equations) {
+        if constexpr (check_types) check_equation_type(eq);
         populate_literal_buffer(eq);
         switch (eq.get_op()) {
             using enum primitive_op;
@@ -414,22 +540,15 @@ std::vector<array_t> jax_vm::run(const std::vector<array_t>& input) {
 }
 
 void jax_vm::reset() {
-    for (auto& v: values) v.reset();
+    for (auto& v: values) v = array_t{};
 }
 
 const array_t& jax_vm::fetch_value(const var_t& var) const {
-    if (values[var.get_id()] == nullptr) {
-        throw formatted_error("Error: variable %{} does not exist", var.get_id());
-    }
-    return *values[var.get_id()];
+    return values[var.get_id()];
 }
 
 void jax_vm::emplace_variable(const var_t& var, array_t array) {
-    if (values[var.get_id()] != nullptr) {
-        throw formatted_error(
-            "Error: variable %{} already exists, it cannot be assigned to again", var.get_id());
-    }
-    values[var.get_id()] = std::make_unique<array_t>(std::move(array));
+    values[var.get_id()] = std::move(array);
 }
 
 const array_t& jax_vm::get_input(const equation& eq, size_t i) {

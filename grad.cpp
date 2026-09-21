@@ -1675,8 +1675,10 @@ void grad_class::propagate_adjoints(equation& eq) {
 
                 var_t x_adjoint = fresh_var(x_type);
 
+                value zero_adjoint = broadcasted_value(x_type, 0);
+
                 output_expr.equations.emplace_back(
-                    std::vector{value{clamped_written_mask}, output_adj, zero_tensor},
+                    std::vector{value{clamped_written_mask}, output_adj, zero_adjoint},
                     std::vector{x_adjoint},
                     SELECT
                 );
