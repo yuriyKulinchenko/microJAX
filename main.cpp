@@ -28,10 +28,60 @@ void slice_example();
 void CSE_example();
 void TRS_example();
 void resolve_broadcast_example();
+void optimisation_example();
 
 int main() {
-    resolve_broadcast_example();
+    optimisation_example();
     return 0;
+}
+
+void optimisation_example() {
+    using namespace jax;
+    using enum dtype_t;
+
+    jaxpr_builder builder {};
+
+    auto x = builder.register_tracer(F32, 4); // [4]
+    auto y = builder.register_tracer(F32, 4); // [4]
+    auto s = builder.register_tracer(F32); // scalar
+    auto t = builder.register_tracer(F32); // scalar
+    auto m = builder.register_tracer(F32, 2, 2); // [2, 2]
+
+    // Algebraic identities: each of these should collapse back to x.
+    auto id_add_mul = (x + 0.0f) * 1.0f; // add(x, 0), mul(x, 1) -> x
+    auto id_sub_div = (x - 0.0f) / 1.0f; // sub(x, 0), div(x, 1) -> x
+    auto neg_neg = -(-1.0f * x); // mul(-1, x) -> neg(x); -neg(x) -> neg(neg(x)) -> x
+
+    // Strength reduction: pow(y, 2) -> integer_pow(y, 2)
+    auto ipow = pow(y, 2.0f);
+
+    // Common subexpression elimination: sin(x) should be computed once.
+    auto cse = sin(x) + sin(x);
+
+    // Reshape composition then identity: reshape(reshape(x,{2,2}),{4}) -> reshape(x,{4}) -> x
+    auto reshaped = reshape(reshape(x, {2, 2}), {4});
+
+    // Reduce over an empty axis set is the identity.
+    auto reduced = reduce_sum(x, {});
+
+    auto combined = id_add_mul + id_sub_div + neg_neg + ipow + cse + reshaped + reduced;
+    builder.register_output(reduce_sum(combined, {0}));
+
+    // Broadcast fusion (resolve_broadcast): bc(s) + bc(t) -> bc(s + t)
+    auto broadcast_fused = broadcast_in_dim(s, {4}, {}) + broadcast_in_dim(t, {4}, {});
+    builder.register_output(reduce_sum(broadcast_fused, {0}));
+
+    // Broadcast composition: bc(bc(s, {4}), {2,4}) -> a single broadcast
+    auto broadcast_composed = broadcast_in_dim(broadcast_in_dim(s, {4}, {}), {2, 4}, {1});
+    builder.register_output(reduce_sum(broadcast_composed, {0, 1}));
+
+    // Transpose identity and composition: both should collapse to m.
+    auto transpose_id = transpose(m, {0, 1});
+    auto transpose_comp = transpose(transpose(m, {1, 0}), {1, 0});
+    builder.register_output(reduce_sum(transpose_id + transpose_comp, {0, 1}));
+
+    std::cout << "Original expression:\n" << builder.jaxpr;
+    std::cout << "Optimised expression:\n" << builder.get_jaxpr();
 }
 
 void resolve_broadcast_example() {

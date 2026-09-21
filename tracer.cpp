@@ -709,11 +709,17 @@ jaxpr_tracer jaxpr_builder::ones(size_t shape, dtype_t dtype) {
 }
 
 expression&& jaxpr_builder::get_jaxpr(bool optimise_IR) {
+
     if (optimise_IR) {
-        jaxpr.eliminate_common_subexpressions();
-        jaxpr.rewrite_terms();
-        jaxpr.eliminate_dead_code();
+        bool changed = true;
+        while (changed) {
+            changed = false;
+            changed |= jaxpr.eliminate_common_subexpressions();
+            changed |= jaxpr.rewrite_terms();
+            changed |= jaxpr.eliminate_dead_code();
+        }
     }
+    jaxpr.normalise_variables();
     return std::move(jaxpr);
 }
 

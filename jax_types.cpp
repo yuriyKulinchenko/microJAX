@@ -185,19 +185,24 @@ namespace jax {
         return var_id++;
     }
 
-    void expression::eliminate_dead_code() {
+    bool expression::eliminate_dead_code() {
         DCE_class instance {*this};
-        instance.apply_dead_code_elimination();
+        return instance.apply_dead_code_elimination();
     }
 
-    void expression::eliminate_common_subexpressions() {
+    bool expression::eliminate_common_subexpressions() {
         CSE_class instance {*this};
-        instance.apply_common_subexpression_elimination();
+        return instance.apply_common_subexpression_elimination();
     }
 
-    void expression::rewrite_terms() {
+    bool expression::rewrite_terms() {
         TRS_class instance {*this};
-        instance.apply_term_rewrite();
+        return instance.apply_term_rewrite();
+    }
+
+    bool expression::normalise_variables() {
+        VDN_class instance {*this};
+        return instance.apply_variable_domain_normalisation();
     }
 
     bool expression::operator==(const expression& other) const {

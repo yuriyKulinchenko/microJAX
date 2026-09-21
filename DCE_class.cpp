@@ -28,8 +28,9 @@ which tracks which equations need to be kept.
 
 DCE_class::DCE_class(expression& expr): input_expr(expr) {}
 
-void DCE_class::apply_dead_code_elimination() {
+bool DCE_class::apply_dead_code_elimination() {
     auto& equations = input_expr.equations;
+    bool changed = false;
 
     std::vector keep(equations.size(), false);
     std::unordered_set<size_t> used_ids {};
@@ -70,13 +71,13 @@ void DCE_class::apply_dead_code_elimination() {
             using enum primitive_op;
             case COND: {
                 for (auto& expr: std::get<cond_params>(equation.get_params()).branches) {
-                    expr.eliminate_dead_code();
+                    changed |= expr.eliminate_dead_code();
                 }
                 break;
             }
 
             case SCAN: {
-                std::get<scan_params>(equation.get_params()).jaxpr.eliminate_dead_code();
+                changed |= std::get<scan_params>(equation.get_params()).jaxpr.eliminate_dead_code();
                 break;
             }
             default:
@@ -93,7 +94,10 @@ void DCE_class::apply_dead_code_elimination() {
     }
 
     // Shrink the vector appropriately:
+    changed |= (place_index != equations.size());
     equations.erase(equations.begin() + place_index, equations.end());
+
+    return changed;
 }
 
 // Efficiently represents a single equation key when performing CSE:
@@ -187,7 +191,8 @@ namespace std {
 
 CSE_class::CSE_class(expression& expr): input_expr(expr) {}
 
-void CSE_class::apply_common_subexpression_elimination() {
+bool CSE_class::apply_common_subexpression_elimination() {
+    bool changed = false;
     std::unordered_map<size_t, size_t> find_map {};
     std::unordered_map<equation_key, std::span<const var_t>> cse_map {};
 
@@ -202,7 +207,9 @@ void CSE_class::apply_common_subexpression_elimination() {
         for (auto& val: values) {
             if (val.is_var()) {
                 size_t& var_id = val.get_var().get_id();
-                var_id = find(var_id);
+                size_t new_id = find(var_id);
+                if (new_id != var_id) changed = true;
+                var_id = new_id;
             }
         }
     };
@@ -217,11 +224,11 @@ void CSE_class::apply_common_subexpression_elimination() {
             using enum primitive_op;
             case COND:
                 for (auto& branch: std::get<cond_params>(eq.get_params()).branches) {
-                    branch.eliminate_common_subexpressions();
+                    changed |= branch.eliminate_common_subexpressions();
                 }
                 break;
             case SCAN:
-                std::get<scan_params>(eq.get_params()).jaxpr.eliminate_common_subexpressions();
+                changed |= std::get<scan_params>(eq.get_params()).jaxpr.eliminate_common_subexpressions();
                 break;
             default: break;
         }
@@ -239,6 +246,8 @@ void CSE_class::apply_common_subexpression_elimination() {
     }
 
     path_compress(input_expr.outvals);
+
+    return changed;
 }
 
 TRS_class::TRS_class(expression& expr): input_expr(expr) {}
@@ -267,7 +276,8 @@ is attempted.
 
 */
 
-void TRS_class::apply_term_rewrite(bool fast_math) {
+bool TRS_class::apply_term_rewrite(bool fast_math) {
+    bool changed = false;
     std::unordered_map<size_t, size_t> id_equation_map {};
     // Unlike CSE, this maps var_id to var_id | literal
     std::unordered_map<size_t, value_variant> find_map {};
@@ -303,11 +313,13 @@ void TRS_class::apply_term_rewrite(bool fast_math) {
     };
 
     auto bind = [&](var_t& var, const value& bound_val) -> void {
+        changed = true;
         find_map[var.get_id()] = to_value_variant(bound_val);
     };
 
     // Broadcasts if necessary:
     auto bind_constant = [&](var_t& var, const double x) -> void {
+        changed = true;
         if (var.get_shape().empty()) {
             find_map[var.get_id()] = literal_t{var.get_dtype(), x};
         } else {
@@ -945,6 +957,7 @@ void TRS_class::apply_term_rewrite(bool fast_math) {
                         value& inner_x = new_equations[*result].get_input(0);
                         // Rewrite op:
                         x = inner_x;
+                        changed = true;
                         break;
                     }
                 }
@@ -1136,4 +1149,71 @@ void TRS_class::apply_term_rewrite(bool fast_math) {
     input_expr.equations = std::move(new_equations);
     input_expr.var_id = fresh_var_id;
     path_compress(input_expr.outvals);
+
+    return changed;
+}
+
+/*
+
+The purpose of VDR_class is to convert a jaxpr with gaps in variable indices into one without. For instance:
+
+%5 = add %0 %1
+%7 = mul %5 %0
+
+Will be normalized to:
+
+%2 = add %0 %1
+%3 = mul %2 %0
+
+This is achieved by maintaining a simple variable map.
+
+*/
+
+VDN_class::VDN_class(expression& expr): input_expr{expr} {}
+
+bool VDN_class::apply_variable_domain_normalisation() {
+    bool changed = false;
+    size_t var_id = 0;
+    std::unordered_map<size_t, size_t> var_id_map {}; // Maps from old var_id space to new var_id space
+
+    auto register_and_update = [&](var_t& var) -> void {
+        if (var.get_id() != var_id) changed = true;
+        var_id_map[var.get_id()] = var_id;
+        var.get_id() = var_id++;
+    };
+
+    auto update = [&](value& val) -> void {
+        if (val.is_var()) {
+            size_t& id = val.get_var().get_id();
+            id = var_id_map[id];
+        }
+    };
+
+    for (auto& constvar: input_expr.constvars) register_and_update(constvar);
+    for (auto& invar: input_expr.invars) register_and_update(invar);
+
+    for (equation& eq: input_expr.equations) {
+        for (value& inval: eq.get_input()) update(inval);
+        for (var_t& outvar: eq.get_output()) register_and_update(outvar);
+
+        switch (eq.get_op()) {
+            using enum primitive_op;
+            case COND:
+                for (auto& branch: std::get<cond_params>(eq.get_params()).branches) {
+                    changed |= VDN_class{branch}.apply_variable_domain_normalisation();
+                }
+                break;
+            case SCAN:
+                changed |= VDN_class{std::get<scan_params>(eq.get_params()).jaxpr}
+                    .apply_variable_domain_normalisation();
+                break;
+            default: break;
+        }
+    }
+
+    for (auto& outval: input_expr.outvals) update(outval);
+
+    input_expr.var_id = var_id;
+
+    return changed;
 }

@@ -6,7 +6,7 @@
 class DCE_class {
 public:
     explicit DCE_class(jax::expression& expr);
-    void apply_dead_code_elimination();
+    bool apply_dead_code_elimination();
 
 private:
     jax::expression& input_expr;
@@ -15,7 +15,7 @@ private:
 class CSE_class {
 public:
     explicit CSE_class(jax::expression& expr);
-    void apply_common_subexpression_elimination();
+    bool apply_common_subexpression_elimination();
 
 private:
     jax::expression& input_expr;
@@ -24,16 +24,19 @@ private:
 class TRS_class {
 public:
     explicit TRS_class(jax::expression& expr);
-    void apply_term_rewrite(bool fast_math=true);
+    bool apply_term_rewrite(bool fast_math=true);
 
 private:
     jax::expression& input_expr;
 };
 
-class VDR_class {
+class VDN_class {
 public:
-    explicit VDR_class(jax::expression& expr);
-    void apply_varaible_domain_reduction();
+    explicit VDN_class(jax::expression& expr);
+    bool apply_variable_domain_normalisation();
+
+private:
+    jax::expression& input_expr;
 };
 
 

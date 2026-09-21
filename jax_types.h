@@ -99,9 +99,10 @@ namespace jax {
         equation& add_equation(equation eq);
         var_t fresh_var(type_t type);
 
-        void eliminate_dead_code();
-        void eliminate_common_subexpressions();
-        void rewrite_terms();
+        bool eliminate_dead_code();
+        bool eliminate_common_subexpressions();
+        bool rewrite_terms();
+        bool normalise_variables();
 
         size_t new_var_id();
 
