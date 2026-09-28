@@ -1,5 +1,5 @@
 #include "jax_types.h"
-#include "DCE_class.h"
+#include "passes.h"
 #include "helper.h"
 
 namespace jax {

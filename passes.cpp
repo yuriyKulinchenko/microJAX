@@ -2,7 +2,7 @@
 // Created by Yuriy Kulinchenko on 01/07/2026.
 //
 
-#include "DCE_class.h"
+#include "passes.h"
 #include "helper.h"
 
 #include <unordered_set>

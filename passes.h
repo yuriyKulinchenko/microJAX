@@ -39,8 +39,4 @@ private:
     jax::expression& input_expr;
 };
 
-
-
-
-
-#endif //DCE_CLASS_H
+#endif

@@ -24,8 +24,8 @@ add_executable(microJAX main.cpp
         tagged_variant.h
         grad.h
         grad.cpp
-        DCE_class.cpp
-        DCE_class.h
+        passes.cpp
+        passes.h
         jax_format.h
         jax_vm.h
         jax_vm.cpp
@@ -33,6 +33,8 @@ add_executable(microJAX main.cpp
         jax_array.h
         type_checker.h
         type_checker.cpp
+        HLO_emitter.h
+        HLO_emitter.cpp
 )
 
 add_executable(microJAX_tests gtest_test.cpp
@@ -40,7 +42,7 @@ add_executable(microJAX_tests gtest_test.cpp
         tracer.cpp
         jax_logger.cpp
         grad.cpp
-        DCE_class.cpp
+        passes.cpp
         jax_vm.cpp
         jax_array.cpp
         type_checker.cpp
